@@ -8,8 +8,9 @@ public sealed partial class QueryEngine
         CancellationToken token, HashSet<string> path, QueryStatistics statistics) => plan switch
     {
         SelectStatement select => ExecuteSelect(document, select, parameters, token, path, statistics),
+        TransformStatement transform => ExecuteTransform(document, transform, parameters, token, path, statistics),
         UnionStatement union => ExecuteUnion(document, union, parameters, token, path, statistics),
-        _ => throw new DataSpaceException("A record source must be a SELECT or UNION query.")
+        _ => throw new DataSpaceException("A record source must be a SELECT, UNION or TRANSFORM query.")
     };
     private TableDefinition ResolveSource(DatabaseDocument document, string name, IReadOnlyDictionary<string, object?> parameters,
         CancellationToken token, HashSet<string> path, QueryStatistics statistics)
@@ -66,7 +67,11 @@ public sealed partial class QueryEngine
         if (grouped)
         {
             if (projections.Any(p => !p.Expression.GroupSafe(plan.Groups))) throw new DataSpaceException("Every selected field must be grouped or aggregated.");
+            if (Options.EnableStreamingAggregates) rows = StreamGroups(rows, plan, projections, parameters, token, statistics);
+            else
+            {
             var buffered = rows.ToList(); CheckSize(buffered.Count);
+            statistics.BufferedAggregateRows = Math.Max(statistics.BufferedAggregateRows, buffered.Count);
             if (plan.Groups.Count == 0)
             {
                 var context = buffered.FirstOrDefault()?.Clone() ?? new EvaluationContext { Parameters = parameters };
@@ -74,9 +79,15 @@ public sealed partial class QueryEngine
             }
             else rows = buffered.GroupBy(row => { token.ThrowIfCancellationRequested(); return SqlValue.Key(plan.Groups.Select(g => g.Eval(row))); })
                 .Select(group => { var context = group.First().Clone(); context.Group = group.ToList(); return context; });
+            }
         }
         else if (plan.Having is not null) throw new DataSpaceException("HAVING requires grouping or aggregates.");
-        var selected = new List<(object?[] Values, object?[] Order, int Ordinal)>();
+        var selected = new List<SelectedRow>();
+        var ordering = new RowOrdering(plan.Order, token);
+        var capacity = plan.Limit is { } requestedLimit ? (long)plan.Offset + requestedLimit : 0;
+        PriorityQueue<SelectedRow, SelectedRow>? top = Options.EnableTopKSort && plan.Order.Count > 0 &&
+            plan.Limit is > 0 && capacity <= Options.MaximumIntermediateRows
+            ? new(Comparer<SelectedRow>.Create((a, b) => ordering.Compare(b, a))) : null;
         var seen = new HashSet<string>(StringComparer.Ordinal); var skipped = 0; var ordinal = 0;
         var sorting = plan.Order.Count > 0;
         // Without ordering, stop once TOP/LIMIT is satisfied; do not clone unseen rows.
@@ -95,28 +106,37 @@ public sealed partial class QueryEngine
             if (!sorting && skipped++ < plan.Offset) continue;
             var orderValues = plan.Order.Select(o => o.Expression is LiteralExpr { Value: decimal n } && n == decimal.Truncate(n) && n > 0 && n <= values.Length
                 ? values[(int)n - 1] : o.Expression.Eval(context)).ToArray();
-            selected.Add((values, orderValues, ordinal++));
-            if (sorting) CheckSize(selected.Count);
+            var item = new SelectedRow(values, orderValues, ordinal++);
+            if (sorting)
+            {
+                statistics.SortCandidateRows++;
+                if (top is not null)
+                {
+                    if (top.Count < capacity) top.Enqueue(item, item);
+                    else if (ordering.Compare(item, top.Peek()) < 0) top.DequeueEnqueue(item, item);
+                    statistics.PeakSortRows = Math.Max(statistics.PeakSortRows, top.Count);
+                }
+                else
+                {
+                    selected.Add(item); CheckSize(selected.Count);
+                    statistics.PeakSortRows = Math.Max(statistics.PeakSortRows, selected.Count);
+                }
+            }
             else
             {
+                selected.Add(item);
                 if (selected.Count > Options.MaximumResultRows) throw new DataSpaceException("Result-row limit exceeded. Use TOP or LIMIT.");
                 if (plan.Limit is { } limit && selected.Count >= limit) break;
             }
         }
         if (sorting)
         {
-            var comparisons = 0;
-            selected.Sort((a, b) =>
-            {
-                if ((++comparisons & 1023) == 0) token.ThrowIfCancellationRequested();
-                for (var i = 0; i < plan.Order.Count; i++) { var compare = SqlValue.Compare(a.Order[i], b.Order[i]); if (compare != 0) return plan.Order[i].Descending ? -Math.Sign(compare) : compare; }
-                return a.Ordinal.CompareTo(b.Ordinal);
-            });
+            if (top is not null) selected = top.UnorderedItems.Select(i => i.Element).ToList();
+            selected.Sort(ordering);
             selected = selected.Skip(plan.Offset).Take(plan.Limit ?? int.MaxValue).ToList();
         }
         if (selected.Count > Options.MaximumResultRows) throw new DataSpaceException("Result-row limit exceeded. Use TOP or LIMIT.");
-        var fields = names.Select((name, i) => new FieldDefinition
-        { Name = name, Width = name.Length > 16 ? 220 : 160, Type = InferType(selected.Select(r => r.Values[i]).FirstOrDefault(v => v is not null), projections[i], sources) }).ToList();
+        var fields = names.Select((name, i) => ResultField(name, selected.Select(r => r.Values[i]).FirstOrDefault(v => v is not null), projections[i], sources)).ToList();
         return new()
         {
             Fields = fields,
@@ -230,6 +250,13 @@ public sealed partial class QueryEngine
                 var field = table.Fields.FirstOrDefault(f => Names.Equal(f.Name, parts[^1]));
                 if (field is not null) return field.Type == FieldType.AutoNumber ? FieldType.Integer : field.Type;
             }
+        }
+        if (projection.Expression is FunctionExpr function)
+        {
+            if (function.Name == "COUNT") return FieldType.Integer;
+            if (function.Name is "SUM" or "AVG") return FieldType.Decimal;
+            if (function.Name is "MIN" or "MAX" or "FIRST" or "LAST" && function.Arguments.Count == 1)
+                return InferType(value, new(function.Arguments[0]), sources);
         }
         return value switch { long or int => FieldType.Integer, decimal or double => FieldType.Decimal, DateTime => FieldType.DateTime, bool => FieldType.YesNo, Guid => FieldType.Guid, _ => FieldType.LongText };
     }
