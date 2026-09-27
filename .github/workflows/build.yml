@@ -1,4 +1,4 @@
-name: Build and test
+name: Build, test and deploy
 on:
   push:
     branches: [main]
@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - name: Test database, SQL and storage
+      - name: Test database, query and storage libraries
         run: dotnet test tests/DataSpace.Tests/DataSpace.Tests.csproj -c Release --logger 'trx;LogFileName=tests.trx'
       - name: Compile reusable renderers
         run: dotnet build src/DataSpace.Rendering/DataSpace.Rendering.csproj -c Release
@@ -26,7 +26,7 @@ jobs:
         with:
           name: test-results
           path: '**/TestResults/*.trx'
-  uno:
+  application:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -35,5 +35,50 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Install WebAssembly toolchain
         run: dotnet workload install wasm-tools --skip-manifest-update
-      - name: Compile reusable Uno controls
-        run: dotnet build src/DataSpace.Controls/DataSpace.Controls.csproj -c Release -f net10.0-desktop
+      - name: Compile desktop application
+        run: dotnet build src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-desktop
+      - name: Publish browser application
+        run: dotnet publish src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-browserwasm -o artifacts/publish -p:WasmShellWebAppBasePath=./
+      - name: Stage static site
+        shell: bash
+        run: |
+          set -euo pipefail
+          index=$(find artifacts/publish src/DataSpace.App/bin/Release/net10.0-browserwasm -name index.html -type f | head -n 1)
+          test -n "$index"
+          mkdir -p artifacts/site
+          cp -a "$(dirname "$index")/." artifacts/site/
+          cp src/DataSpace.App/browser-storage.js artifacts/site/browser-storage.js
+          touch artifacts/site/.nojekyll
+          test -f artifacts/site/index.html
+          find artifacts/site -name '*.wasm' -print -quit | grep .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-app
+          path: artifacts/site
+          include-hidden-files: true
+          if-no-files-found: error
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [engine, application]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-app
+          path: site
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy browser application
+        id: deployment
+        uses: actions/deploy-pages@v4
