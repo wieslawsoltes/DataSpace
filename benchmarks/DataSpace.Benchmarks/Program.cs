@@ -57,7 +57,7 @@ var entries = new TableDefinition { Name = "Entries", Fields = [new() { Name = "
 for (var i = 0; i < 50000; i++) RecordOperations.Insert(entries, new Dictionary<string, string?> { ["ID"] = i.ToString(), ["Category"] = (i % 32).ToString(), ["Amount"] = ((i * 3571L) % 7919).ToString() });
 analytics.Tables.Add(entries); SchemaValidator.Validate(analytics);
 var streamed = new QueryEngine();
-var buffered = new QueryEngine(new() { EnableStreamingAggregates = false, EnableTopKSort = false, EnableReusableRowContexts = false });
+var buffered = new QueryEngine(new() { EnableStreamingAggregates = false, EnableTopKSort = false, EnableReusableRowContexts = false, EnableColumnPruning = false });
 const string aggregateSql = "SELECT Category, Sum(Amount) AS Total, Avg(Amount) AS Mean, Count(*) AS N, Min(Amount) AS Low, Max(Amount) AS High FROM Entries GROUP BY Category ORDER BY Total DESC";
 const string topSql = "SELECT TOP 20 ID, Amount FROM Entries ORDER BY Amount DESC, ID";
 void SameRows(QueryResult a, QueryResult b)
@@ -70,11 +70,27 @@ var aggregateFast = streamed.Select(analytics, aggregateSql); var aggregateSlow 
 var topFast = streamed.Select(analytics, topSql); var topSlow = buffered.Select(analytics, topSql); SameRows(topFast, topSlow);
 Pair("Grouped analytics / 50,000 records / 32 groups", "Buffered contexts and repeated aggregate scans", () => buffered.Select(analytics, aggregateSql), "Reusable scalar context and streaming accumulators", () => streamed.Select(analytics, aggregateSql));
 Pair("Ordered TOP 20 / 50,000 records", "Distinct source contexts and full stable sort", () => buffered.Select(analytics, topSql), "Reusable scalar context and bounded stable selection", () => streamed.Select(analytics, topSql));
+// Isolate column pruning: both engines use the same reusable contexts and TOP heap.
+var wide = new DatabaseDocument();
+var wideTable = new TableDefinition { Name = "Wide" };
+for (var c = 0; c < 64; c++) wideTable.Fields.Add(new() { Name = "F" + c, Type = FieldType.Decimal });
+for (var r = 0; r < 10000; r++) RecordOperations.Insert(wideTable,
+    Enumerable.Range(0, 64).ToDictionary(c => "F" + c, c => (string?)((r * (c + 1L)) % 7919).ToString()));
+wide.Tables.Add(wideTable); SchemaValidator.Validate(wide);
+var pruned = new QueryEngine(); var allColumns = new QueryEngine(new() { EnableColumnPruning = false });
+const string wideSql = "SELECT TOP 20 F0 FROM Wide WHERE F1 >= 0 ORDER BY F0 DESC";
+var prunedResult = pruned.Select(wide, wideSql); var allColumnsResult = allColumns.Select(wide, wideSql);
+SameRows(prunedResult, allColumnsResult);
+if (prunedResult.Statistics.SourceValuesRead != 20000 || allColumnsResult.Statistics.SourceValuesRead != 640000)
+    throw new Exception("Unexpected wide-scan decoding count.");
+Pair("Wide table TOP 20 / 10,000 records / 64 columns", "Decode all 64 source columns", () => allColumns.Select(wide, wideSql),
+    "Decode only the 2 referenced source columns", () => pruned.Select(wide, wideSql));
 var output = new
 {
     runtime = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
     processorCount = Environment.ProcessorCount, configuration = "Release", measuredAtUtc = DateTime.UtcNow,
     scope = "Managed engine microbenchmarks, not browser or hardware-GPU measurements; no storage I/O. Timings are environment-dependent.",
+    columnPruning = new { rows = prunedResult.Statistics.SourceRowsRead, referenceValuesRead = allColumnsResult.Statistics.SourceValuesRead, optimizedValuesRead = prunedResult.Statistics.SourceValuesRead },
     aggregation = new { referenceRowsBuffered = aggregateSlow.Statistics.BufferedAggregateRows, optimizedGroupsRetained = aggregateFast.Statistics.PeakAggregateGroups, optimizedRowsBuffered = aggregateFast.Statistics.BufferedAggregateRows },
     orderedTop = new { candidates = topFast.Statistics.SortCandidateRows, referencePeakRows = topSlow.Statistics.PeakSortRows, optimizedPeakRows = topFast.Statistics.PeakSortRows },
     joins = new { rows = fast.Records.Count, hashComparisons = fast.Statistics.JoinComparisons, referenceComparisons = slow.Statistics.JoinComparisons }, results

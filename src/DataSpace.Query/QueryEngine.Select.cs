@@ -51,8 +51,15 @@ public sealed partial class QueryEngine
         foreach (var order in plan.Order) Bind(order.Expression, aliases);
         var grouped = plan.Groups.Count > 0 || projections.Any(p => p.Expression.Aggregate) || plan.Having?.Aggregate == true;
         var reuse = Options.EnableReusableRowContexts && plan.Joins.Count == 0 && (!grouped || Options.EnableStreamingAggregates);
+        // Bind every name above before choosing the narrower physical scan. Result
+        // aliases in ORDER BY/HAVING may retain extra fields, but never omit inputs.
+        IEnumerable<Expr> scanExpressions = projections.Select(p => p.Expression).Concat(plan.Groups).Concat(plan.Order.Select(o => o.Expression));
+        if (plan.Where is not null) scanExpressions = scanExpressions.Append(plan.Where);
+        if (plan.Having is not null) scanExpressions = scanExpressions.Append(plan.Having);
+        var scanFields = plan.Source is not null && plan.Joins.Count == 0
+            ? PrunedFields(sources[0].Table, sources[0].Source.Alias, scanExpressions) : null;
         IEnumerable<EvaluationContext> rows = plan.Source is null ? [new EvaluationContext { Parameters = parameters }]
-            : SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics, reuse);
+            : SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics, reuse, scanFields);
         for (var index = 0; index < plan.Joins.Count; index++)
             rows = JoinRows(rows, plan.Joins[index], sources[index + 1].Table, sources.Take(index + 1).ToList(), parameters, token, statistics);
         if (plan.Where is { } where) rows = rows.Where(row => { token.ThrowIfCancellationRequested(); return SqlValue.Truth(where.Eval(row)); });

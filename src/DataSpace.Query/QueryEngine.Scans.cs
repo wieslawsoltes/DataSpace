@@ -4,29 +4,44 @@ namespace DataSpace.Query;
 
 public sealed partial class QueryEngine
 {
+    private IReadOnlyList<FieldDefinition>? PrunedFields(TableDefinition table, string alias, IEnumerable<Expr> expressions)
+    {
+        if (!Options.EnableColumnPruning) return null;
+        // Wildcards have already been expanded and binding already checked. Explicit
+        // parameters do not read a field even when they have the same name as one.
+        var names = expressions.SelectMany(ExpressionAnalysis.Names).Where(name => !name.Parameter)
+            .Select(name => name.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return table.Fields.Where(field => names.Contains(field.Name) || names.Contains(alias + "." + field.Name)).ToArray();
+    }
     private IEnumerable<EvaluationContext> SourceRows(TableDefinition table, string alias, IReadOnlyDictionary<string, object?> parameters,
-        CancellationToken token, QueryStatistics statistics, bool reuseContext = false)
+        CancellationToken token, QueryStatistics statistics, bool reuseContext = false, IReadOnlyList<FieldDefinition>? selectedFields = null)
     {
         var count = 0;
-        if (!reuseContext)
+        if (!reuseContext && selectedFields is null)
         {
+            // Retain the unoptimized path for differential tests and joined inputs.
             foreach (var record in table.Records)
             {
                 token.ThrowIfCancellationRequested(); CheckSize(++count); statistics.SourceRowsRead++; statistics.SourceContextsCreated++;
+                statistics.SourceValuesRead += table.Fields.Count;
                 yield return AddSource(new EvaluationContext { Parameters = parameters }, table, alias, record);
             }
             yield break;
         }
-        // Only direct single-source streaming consumers may select this path. Joins
-        // and buffered reference groups retain contexts and must receive distinct ones.
-        var context = new EvaluationContext { Parameters = parameters }; statistics.SourceContextsCreated++;
-        var fields = table.Fields.Select(field => (Field: field, Qualified: alias + "." + field.Name)).ToArray();
+        // Only direct single-source streaming consumers may reuse a context. Joins
+        // and reference groups retain rows and must receive distinct contexts.
+        var fields = (selectedFields ?? table.Fields).Select(field => (Field: field, Qualified: alias + "." + field.Name)).ToArray();
+        EvaluationContext? shared = null;
+        if (reuseContext) { shared = new EvaluationContext { Parameters = parameters }; statistics.SourceContextsCreated++; }
         foreach (var record in table.Records)
         {
             token.ThrowIfCancellationRequested(); CheckSize(++count); statistics.SourceRowsRead++;
+            var context = shared ?? new EvaluationContext { Parameters = parameters };
+            if (shared is null) statistics.SourceContextsCreated++;
             foreach (var (field, qualified) in fields)
             {
                 var value = FieldValues.Parse(field, record[field.Name]); context.Values[field.Name] = value; context.Values[qualified] = value;
+                statistics.SourceValuesRead++;
             }
             yield return context;
         }
