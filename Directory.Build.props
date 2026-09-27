@@ -3,7 +3,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>0.2.0-preview.1</Version>
+    <Version>0.2.0-preview.2</Version>
     <SkiaSharpVersion>4.152.1</SkiaSharpVersion>
     <Authors>DataSpace contributors</Authors>
     <RepositoryUrl>https://github.com/wieslawsoltes/DataSpace</RepositoryUrl>

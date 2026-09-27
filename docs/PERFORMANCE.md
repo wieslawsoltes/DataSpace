@@ -8,7 +8,9 @@ Ordinary cell/range edits use `DatabaseWorkspace.UpdateRecords`. It copies docum
 
 The datasheet uses the lazy API, identity lookup without `ToList`, and targeted cell transactions. Navigation and ribbon tabs no longer rebuild on every cell edit. Search is debounced. Totals are computed in one pass when requested and cached until the snapshot changes; repainting or scrolling does not rescan the table.
 
-SELECT pipelines stream ordinary projections and filters. Without ORDER BY, TOP/LIMIT stops source enumeration once enough output rows have been produced. GROUP BY and sorting still require buffers. Compatible qualified equality joins build a transient hash lookup of the right input. Duplicate keys, residual ON predicates, composite equality keys and LEFT unmatched rows are preserved. Ineligible or coercing joins use the bounded nested-loop path. `QueryStatistics` reports source-row reads, candidate comparisons and selected join strategy.
+SELECT pipelines stream ordinary projections and filters. Without ORDER BY, TOP/LIMIT stops source enumeration once enough output rows have been produced. GROUP BY retains an accumulator set per group instead of all source rows. Single-table streaming scans reuse one scalar context; the original buffered-group path and join inputs deliberately keep distinct contexts. Ordered TOP/LIMIT uses a stable priority queue retaining at most offset+limit candidates; the source is still scanned. Unbounded ORDER BY still requires a full bounded sort. Compatible qualified equality joins build a transient hash lookup of the right input. Duplicate keys, residual ON predicates, composite equality keys and LEFT unmatched rows are preserved. Ineligible or coercing joins use the bounded nested-loop path. `QueryStatistics` reports source-row reads, candidate comparisons and selected join strategy.
+
+Single-source SELECT and TRANSFORM scans also prune unused fields. Every expression is bound against the complete schema before choosing the physical scan. Projections, filters, grouping, sorting, HAVING, pivot expressions and aggregate arguments contribute their referenced fields. Expanded wildcards retain all fields. Explicit parameters do not require source values; unqualified names retain the existing field-before-parameter resolution. Output aliases may conservatively retain an extra field rather than risk dropping a required input. Join inputs still use complete independent contexts. `COUNT(*)` can scan/count records without decoding any typed field values, but still observes cancellation and row-work limits.
 
 These are not persistent database indexes. The index designer manages constraint metadata; a durable page store, persistent B-trees and a cost-based planner remain unimplemented.
 
@@ -36,8 +38,33 @@ The edit baseline reproduces the former JSON clone, mutation and full validation
 
 **Scope:** these are managed-engine microbenchmarks, not browser startup, end-to-end interaction latency, file-save timing, frame rate, peak live memory or hardware-GPU measurements. Allocation figures measure total managed allocations during an operation, not retained memory. Results vary by environment, record width, constraints, joins and data distribution. Do not extrapolate these ratios to the whole application.
 
+## Grouping and ordered TOP sample
+
+Run [36346385269](https://github.com/wieslawsoltes/DataSpace/actions/runs/36346385269), source `b90b3134b0e203c81c982602423c386b2488c875`, on 2026-09-27 with .NET 10.0.12 / Ubuntu 24.04.5 / x64 / four logical processors, Release:
+
+| Scenario | Reference median | Optimized median | Reference allocated | Optimized allocated |
+| --- | ---: | ---: | ---: | ---: |
+| 50,000 rows, 32 groups, five aggregates | 119.7956 ms | 47.7650 ms | 94,947,016 B | 35,235,048 B |
+| Ordered TOP 20 over 50,000 rows | 146.0129 ms | 51.2210 ms | 115,868,568 B | 59,622,240 B |
+
+The first reference retains 50,000 contexts and scans each group's input for every aggregate; the optimized query retains 32 group states and zero grouped input rows. The second reference sorts 50,000 candidates; the optimized query keeps only 20. Both scan all 50,000 source rows, and both pairs verify identical output before measuring. The optimized cases also enable scalar-context reuse, so these are combined execution-path improvements rather than isolated algorithm timings.
+
+`EnableStreamingAggregates`, `EnableTopKSort` and `EnableReusableRowContexts` independently select the reference/optimized paths. Statistics report buffered group rows, retained groups, source contexts, sort candidates and peak sort rows. These counters describe executor state, not measured process peak memory. Five alternating samples after two warmups are recorded; timings remain diagnostic, not CI pass/fail thresholds or browser responsiveness claims.
+
+## Wide-table scan benchmark
+
+The benchmark also constructs 10,000 records with 64 decimal columns and runs:
+
+```sql
+SELECT TOP 20 F0 FROM Wide WHERE F1 >= 0 ORDER BY F0 DESC;
+```
+
+The paired engines differ only in `QueryOptions.EnableColumnPruning`; both use reusable scalar contexts and the same bounded TOP selection. The comparison therefore isolates column decoding and the smaller per-row context. The benchmark checks identical output and exact work counts before timing: 640,000 typed source values without pruning, 20,000 with pruning. Both scan all 10,000 records. These counts measure avoided decoding, not a claimed wall-clock speedup; use the generated artifact for the actual timings on each runner.
+
+`QueryStatistics.SourceValuesRead` counts typed source values decoded during execution, excluding schema binding and output serialization. Saved-query sources contribute their own execution work. Disabling pruning is useful for differential tests; it does not select a different storage backend. `ColumnPruningTests` compares projections, aliases, parameters, hidden filter/sort inputs, wildcards, grouping, crosstabs, joins, saved sources and make-table results across pruning/context/aggregation options. Unknown names are rejected even on empty sources and TOP 0.
+
 ## Remaining scaling limits
 
-Record-list copying and identity maps still scale with table size. Filters/sorts remain scans unless TOP can stop a streamed SQL pipeline. Grouping, UNION, saved-query sources and ordering buffer their results. Undo/redo deep-copy a restored snapshot. Complex cascades and action queries retain full-document validation. Saves still serialize the whole document, and browser storage/import retains its size limit. WebAssembly threads are disabled in the Pages build; CPU-heavy operations can still block browser input. No hardware-GPU, million-row end-to-end, native OS or multi-user performance qualification is claimed.
+Record-list copying and identity maps still scale with table size. Filters/sorts remain scans unless TOP can stop a streamed SQL pipeline. Groups retain accumulator state per distinct group; highly distinct grouping still grows with input. UNION, saved-query sources and unbounded ordering buffer their results, and DISTINCT keeps a seen-key set. TOP with a large offset may fall back to full sorting. Crosstab pivot cells and dense output are separately bounded. Undo/redo deep-copy a restored snapshot. Complex cascades and action queries retain full-document validation. Saves still serialize the whole document, and browser storage/import retains its size limit. WebAssembly threads are disabled in the Pages build; CPU-heavy operations can still block browser input. No hardware-GPU, million-row end-to-end, native OS or multi-user performance qualification is claimed.
 
 All public model objects remain mutable for construction/serialization. Change live data through the workspace transaction API only. A virtual view's returned records are detached display snapshots with a bounded lifetime, not writable backing storage. External direct mutation can bypass constraints, invalidate caches and violate snapshot/history assumptions.

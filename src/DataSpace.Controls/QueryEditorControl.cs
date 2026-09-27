@@ -22,7 +22,7 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
     private QueryResult? _lastResult;
     private Dictionary<string, string?> _savedParameters;
     private QueryEditorView _view = QueryEditorView.Sql;
-    private bool _running, _disposed;
+    private bool _running, _disposed, _dialogOpen;
     public Func<string, Task<bool>>? ConfirmActionAsync { get; set; }
     public event Action<string>? Error;
     public bool HasPendingChanges => _sql.Text != _baselineSql || _parameters.Text != _baselineParameters || _state != _baselineState || _designer?.HasPendingChanges == true;
@@ -46,7 +46,8 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
             OfficeVisuals.Button("Design View", () => TrySwitch(QueryEditorView.Design), "design", "QueryDesignView"),
             OfficeVisuals.Button("SQL View", () => TrySwitch(QueryEditorView.Sql), "query", "QuerySqlView"),
             OfficeVisuals.Button("Datasheet View", () => TrySwitch(QueryEditorView.Datasheet), "table", "QueryDatasheetView"),
-            OfficeVisuals.Button("Run", async () => await RunAsync(), "query", "RunQuery")); toolbar.Margin = new(8);
+            OfficeVisuals.Button("Run", async () => await RunAsync(), "query", "RunQuery"),
+            OfficeVisuals.Button("Crosstab Builder", async () => await ShowCrosstabBuilderAsync(), "query", "CrosstabBuilder")); toolbar.Margin = new(8);
         OfficeVisuals.Add(root, toolbar);
         _sqlView = OfficeVisuals.Grid("Auto,*", "3*,*");
         var sqlLabel = OfficeVisuals.Text("SQL statement", 12, bold: true); sqlLabel.Margin = new(8);
@@ -62,6 +63,30 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
             if (design) TrySwitch(QueryEditorView.Design);
             else { try { if (_engine.IsReadOnly(_sql.Text)) await RunAsync(); } catch (Exception error) { ShowError(error.Message); } }
         };
+    }
+    public async Task ShowCrosstabBuilderAsync()
+    {
+        if (_disposed || _running || _dialogOpen) return; _dialogOpen = true;
+        try
+        {
+            SynchronizeDesign(); CrosstabDesign? definition = null;
+            try { definition = CrosstabDesign.FromSql(_sql.Text); } catch (DataSpaceException) { /* New builder draft; SQL is unchanged until Generate. */ }
+            var builder = new CrosstabBuilderControl(_workspace.Document, definition);
+            var errorText = OfficeVisuals.Text("", 12, "9C252A"); errorText.TextWrapping = TextWrapping.Wrap;
+            var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Crosstab Query", Content = OfficeVisuals.Stack(errorText, builder),
+                PrimaryButtonText = "Generate SQL", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
+            string? generated = null;
+            dialog.PrimaryButtonClick += (_, e) =>
+            {
+                try { generated = builder.ToSql(); }
+                catch (Exception error) { e.Cancel = true; errorText.Text = error.Message; }
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary || generated is null || _disposed) return;
+            _designer?.Dispose(); _designer = null; _state = null; _sql.Text = generated;
+            _host.Content = _sqlView; _view = QueryEditorView.Sql; _status.Text = "Crosstab SQL generated. Run to preview the result.";
+        }
+        catch (Exception error) { ShowError(error.Message); }
+        finally { _dialogOpen = false; }
     }
     private void ShowError(string message) { _status.Text = message; Error?.Invoke(message); }
     private void TrySwitch(QueryEditorView view) { try { SwitchView(view); } catch (Exception error) { ShowError(error.Message); } }

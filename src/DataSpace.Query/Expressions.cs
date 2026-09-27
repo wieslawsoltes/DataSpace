@@ -10,9 +10,10 @@ internal sealed class EvaluationContext
     public HashSet<string> Ambiguous { get; } = new(StringComparer.OrdinalIgnoreCase);
     public IReadOnlyDictionary<string, object?> Parameters { get; init; } = new Dictionary<string, object?>();
     public List<EvaluationContext>? Group { get; set; }
+    public IReadOnlyDictionary<FunctionExpr, object?>? Aggregates { get; set; }
     public EvaluationContext Clone()
     {
-        var context = new EvaluationContext { Parameters = Parameters, Group = Group };
+        var context = new EvaluationContext { Parameters = Parameters, Group = Group, Aggregates = Aggregates };
         foreach (var pair in Values) context.Values[pair.Key] = pair.Value;
         context.Ambiguous.UnionWith(Ambiguous);
         return context;
@@ -113,7 +114,7 @@ internal sealed record InExpr(Expr Operand, List<Expr> Items, bool Negated) : Ex
 }
 internal sealed record FunctionExpr(string Name, List<Expr> Arguments) : Expr
 {
-    private bool IsAggregate => Name is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX" or "FIRST" or "LAST";
+    internal bool IsAggregate => Name is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX" or "FIRST" or "LAST";
     public override bool Aggregate => IsAggregate || Arguments.Any(a => a.Aggregate);
     public override bool GroupSafe(IReadOnlyList<Expr> groups) => IsAggregate || groups.Any(group => SqlText.Same(group, this)) || Arguments.All(a => a.GroupSafe(groups));
     public override object? Eval(EvaluationContext context)
@@ -122,6 +123,8 @@ internal sealed record FunctionExpr(string Name, List<Expr> Arguments) : Expr
         { if (Arguments.Count < min || Arguments.Count > max) throw new DataSpaceException($"{Name} expects {min}" + (min == max ? "" : $"–{max}") + " argument(s)."); }
         if (IsAggregate)
         {
+            AggregateState.Validate(this);
+            if (context.Aggregates is not null && context.Aggregates.TryGetValue(this, out var aggregate)) return aggregate;
             Arity(1, 1);
             if (Arguments[0].Aggregate) throw new DataSpaceException("Nested aggregate functions are not supported.");
             var group = context.Group ?? throw new DataSpaceException("Aggregate function is not valid in this context.");

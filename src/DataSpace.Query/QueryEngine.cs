@@ -5,10 +5,19 @@ namespace DataSpace.Query;
 
 public sealed class QueryStatistics
 {
+    public long SourceContextsCreated { get; internal set; }
     public long SourceRowsRead { get; internal set; }
+    /// <summary>Typed source values decoded; excludes schema binding and result serialization.</summary>
+    public long SourceValuesRead { get; internal set; }
     public long JoinComparisons { get; internal set; }
     public int HashJoins { get; internal set; }
     public int NestedLoopJoins { get; internal set; }
+    public long AggregateInputRows { get; internal set; }
+    public int PeakAggregateGroups { get; internal set; }
+    public int BufferedAggregateRows { get; internal set; }
+    public long SortCandidateRows { get; internal set; }
+    public int PeakSortRows { get; internal set; }
+    public long CrosstabCells { get; internal set; }
     public long OutputRows { get; internal set; }
 }
 public sealed class QueryResult
@@ -26,6 +35,13 @@ public sealed class QueryOptions
     public int MaximumIntermediateRows { get; init; } = 250000;
     public int MaximumResultRows { get; init; } = 100000;
     public int MaximumSourceDepth { get; init; } = 32;
+    public bool EnableReusableRowContexts { get; init; } = true;
+    /// <summary>Decode only referenced fields for eligible single-source scans.</summary>
+    public bool EnableColumnPruning { get; init; } = true;
+    public bool EnableStreamingAggregates { get; init; } = true;
+    public bool EnableTopKSort { get; init; } = true;
+    public int MaximumCrosstabColumns { get; init; } = 256;
+    public int MaximumCrosstabCells { get; init; } = 250000;
     public bool EnableHashJoins { get; init; } = true;
 }
 
@@ -38,9 +54,9 @@ public sealed partial class QueryEngine
     public QueryEngine(QueryOptions? options = null)
     {
         Options = options ?? new();
-        if (Options.MaximumIntermediateRows < 1 || Options.MaximumResultRows < 1 || Options.MaximumSourceDepth is < 1 or > 64) throw new ArgumentOutOfRangeException(nameof(options));
+        if (Options.MaximumIntermediateRows < 1 || Options.MaximumResultRows < 1 || Options.MaximumSourceDepth is < 1 or > 64 || Options.MaximumCrosstabColumns is < 1 or > 256 || Options.MaximumCrosstabCells < 1) throw new ArgumentOutOfRangeException(nameof(options));
     }
-    public bool IsReadOnly(string sql) => Parse(sql) is SelectStatement or UnionStatement;
+    public bool IsReadOnly(string sql) => Parse(sql) is SelectStatement or UnionStatement or TransformStatement;
     private Statement Parse(string sql)
     {
         lock (_cacheLock)
@@ -65,7 +81,7 @@ public sealed partial class QueryEngine
     public QueryResult Execute(DatabaseWorkspace workspace, string sql, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested(); var plan = Parse(sql);
-        if (plan is SelectStatement or UnionStatement) return Select(workspace.Document, sql, parameters, cancellationToken);
+        if (plan is SelectStatement or UnionStatement or TransformStatement) return Select(workspace.Document, sql, parameters, cancellationToken);
         var timer = Stopwatch.StartNew(); var affected = 0; var args = Parameters(parameters);
         workspace.Edit("Run action query", document =>
         {
@@ -117,6 +133,15 @@ public sealed partial class QueryEngine
                     foreach (var row in table.Records)
                     { cancellationToken.ThrowIfCancellationRequested(); if (delete.Where is null || SqlValue.Truth(delete.Where.Eval(AddSource(new EvaluationContext { Parameters = args }, table, table.Name, row)))) ids.Add(row.Id); }
                     RecordOperations.Delete(document, table.Name, ids); affected = ids.Count; break;
+                }
+                case MakeTableStatement make: affected = MakeTable(document, make, args, cancellationToken); break;
+                case CreateIndexStatement createIndex:
+                    document.Table(createIndex.Table).Indexes.Add(new() { Name = createIndex.Index.Name, Fields = createIndex.Index.Fields.ToList(), Unique = createIndex.Index.Unique }); break;
+                case DropIndexStatement dropIndex:
+                {
+                    var table = document.Table(dropIndex.Table);
+                    var index = table.Indexes.FirstOrDefault(i => Names.Equal(i.Name, dropIndex.Index)) ?? throw new DataSpaceException("Index does not exist: " + dropIndex.Index);
+                    table.Indexes.Remove(index); break;
                 }
                 case CreateStatement create:
                     document.Tables.Add(new TableDefinition { Name = create.Table.Name, Fields = create.Table.Fields.Select(TableSchemaDraft.Copy).ToList() }); break;

@@ -13,6 +13,17 @@ internal static class ExpressionAnalysis
         };
         foreach (var child in children) foreach (var item in Names(child)) yield return item;
     }
+    public static IEnumerable<FunctionExpr> Aggregates(Expr expression)
+    {
+        if (expression is FunctionExpr { IsAggregate: true } aggregate) { yield return aggregate; yield break; }
+        IEnumerable<Expr> children = expression switch
+        {
+            UnaryExpr unary => [unary.Operand], BinaryExpr binary => [binary.Left, binary.Right],
+            NullExpr nullCheck => [nullCheck.Operand], InExpr list => new[] { list.Operand }.Concat(list.Items),
+            FunctionExpr function => function.Arguments, _ => []
+        };
+        foreach (var child in children) foreach (var found in Aggregates(child)) yield return found;
+    }
     public static IEnumerable<Expr> Conjuncts(Expr expression)
     {
         if (expression is BinaryExpr { Op: "AND" } conjunction)

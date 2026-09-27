@@ -8,7 +8,8 @@ internal sealed record Source(string Table, string Alias);
 internal sealed record Projection(Expr Expression, string? Alias = null, string? Wildcard = null);
 internal sealed record Join(string Kind, Source Source, Expr? Condition);
 internal sealed record Ordering(Expr Expression, bool Descending);
-internal sealed record SelectStatement(List<Projection> Projections, Source? Source, List<Join> Joins, Expr? Where, List<Expr> Groups, Expr? Having, List<Ordering> Order, bool Distinct, int? Limit, int Offset) : Statement;
+internal sealed record SelectStatement(List<Projection> Projections, Source? Source, List<Join> Joins, Expr? Where, List<Expr> Groups, Expr? Having, List<Ordering> Order, bool Distinct, int? Limit, int Offset) : Statement
+{ public string? Into { get; init; } }
 internal sealed record UnionStatement(List<SelectStatement> Queries, List<bool> All, List<Ordering> Order) : Statement;
 internal sealed record InsertStatement(string Table, List<string> Fields, List<List<Expr>> Rows) : Statement;
 internal sealed record InsertSelectStatement(string Table, List<string> Fields, Statement Query) : Statement;
@@ -18,7 +19,7 @@ internal sealed record CreateStatement(TableDefinition Table) : Statement;
 internal sealed record AlterStatement(string Table, FieldDefinition? Add, string? Drop) : Statement;
 internal sealed record DropStatement(string Table) : Statement;
 
-internal sealed class SqlParser
+internal sealed partial class SqlParser
 {
     private readonly List<Token> _tokens;
     private int _index, _depth;
@@ -37,28 +38,26 @@ internal sealed class SqlParser
     public Statement Parse()
     {
         Statement statement;
-        if (Match("SELECT")) statement = ReadQuery(Select());
+        if (Match("SELECT")) statement = SelectOrMakeTable();
+        else if (Match("TRANSFORM")) statement = Transform();
         else if (Match("TABLE")) statement = ReadQuery(TableSelect());
         else if (Match("INSERT")) statement = Insert();
         else if (Match("UPDATE")) statement = Update();
         else if (Match("DELETE")) { Expect("FROM"); var table = Identifier(); statement = new DeleteStatement(table, Match("WHERE") ? Expression() : null); }
-        else if (Match("CREATE"))
-        {
-            Expect("TABLE"); var table = new TableDefinition { Name = Identifier() }; Expect("(");
-            do table.Fields.Add(Field()); while (Match(",")); Expect(")"); statement = new CreateStatement(table);
-        }
+        else if (Match("CREATE")) statement = Create();
         else if (Match("ALTER"))
         {
             Expect("TABLE"); var table = Identifier();
             if (Match("ADD")) { Match("COLUMN"); statement = new AlterStatement(table, Field(), null); }
             else { Expect("DROP"); Match("COLUMN"); statement = new AlterStatement(table, null, Identifier()); }
         }
-        else if (Match("DROP")) { Expect("TABLE"); statement = new DropStatement(Identifier()); }
-        else throw Error("Expected SELECT, TABLE, INSERT, UPDATE, DELETE, CREATE TABLE, ALTER TABLE or DROP TABLE");
+        else if (Match("DROP")) statement = Drop();
+        else throw Error("Expected SELECT, TRANSFORM, TABLE, INSERT, UPDATE, DELETE, CREATE, ALTER or DROP");
         End(); return statement;
     }
     private Statement ReadQuery(SelectStatement first)
     {
+        if (first.Into is not null) throw Error("INTO cannot be nested in a read-only query");
         if (!Is("UNION")) return first;
         var queries = new List<SelectStatement> { first }; var all = new List<bool>();
         while (Match("UNION"))
@@ -69,6 +68,7 @@ internal sealed class SqlParser
             if (Match("SELECT")) queries.Add(Select());
             else { Expect("TABLE"); queries.Add(TableSelect()); }
         }
+        if (queries.Any(q => q.Into is not null)) throw Error("INTO cannot be nested in UNION");
         var order = queries[^1].Order;
         queries[^1] = queries[^1] with { Order = [] };
         return new UnionStatement(queries, all, order);
@@ -79,7 +79,7 @@ internal sealed class SqlParser
         return new([new(new StarExpr(), Wildcard: "")], new(name, name), [], null, [], null, order, false, null, 0);
     }
     private static readonly HashSet<string> ClauseWords = new(StringComparer.OrdinalIgnoreCase)
-        { "FROM", "WHERE", "GROUP", "HAVING", "ORDER", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "OUTER", "JOIN", "ON", "LIMIT", "OFFSET", "UNION", "ASC", "DESC", "SET", "VALUES" };
+        { "INTO", "PIVOT", "FROM", "WHERE", "GROUP", "HAVING", "ORDER", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "OUTER", "JOIN", "ON", "LIMIT", "OFFSET", "UNION", "ASC", "DESC", "SET", "VALUES" };
     private string? Alias()
     {
         if (Match("AS")) return Identifier();
@@ -107,6 +107,7 @@ internal sealed class SqlParser
             { var source = Identifier(); Expect("."); Expect("*"); projections.Add(new(new StarExpr(), Wildcard: source)); }
             else { var expression = Expression(); projections.Add(new(expression, Alias())); }
         } while (Match(","));
+        var into = Match("INTO") ? Identifier() : null;
         Source? sourceTable = null; var joins = new List<Join>();
         if (Match("FROM"))
         {
@@ -129,7 +130,7 @@ internal sealed class SqlParser
         var having = Match("HAVING") ? Expression() : null; var order = Order();
         if (Match("LIMIT")) limit = PositiveInteger();
         var offset = Match("OFFSET") ? PositiveInteger() : 0;
-        return new(projections, sourceTable, joins, where, groups, having, order, distinct, limit, offset);
+        return new(projections, sourceTable, joins, where, groups, having, order, distinct, limit, offset) { Into = into };
     }
     private int PositiveInteger()
     {

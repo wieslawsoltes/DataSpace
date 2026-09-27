@@ -9,7 +9,7 @@
 
 DataSpace brings an Office-style ribbon, searchable object navigation, tabbed objects, editable datasheets, graphical queries, form design, report previews and relationship diagrams to a shared .NET codebase. The browser is the actual Uno/Skia application compiled to WebAssembly—not an HTML mockup or a separate front end.
 
-> **0.2.0-preview.1:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
+> **0.2.0-preview.2:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
 
 ## Workspace
 
@@ -26,6 +26,8 @@ DataSpace brings an Office-style ribbon, searchable object navigation, tabbed ob
 | Files | Versioned `.dspace` JSON, CSV import/export, desktop file adapters, transactional IndexedDB, cross-tab version checks and explicit backup exports. |
 
 The Northwind-style initial workspace contains demonstration data. Use **File → New** to create a database or **External Data → Text File** to import CSV. In a query, switch between **Design View**, **SQL View** and **Datasheet View**. Compound/action SQL stays in SQL View when it cannot be represented by the SELECT designer. In table Design View, **Indexes** opens the reusable ordered index editor.
+
+Crosstab queries now have a dedicated **Crosstab Builder**, optional fixed column headings and row totals. The engine also supports atomic `SELECT INTO` make-table queries and constraint-index DDL. Streaming groups and bounded ordered `TOP` selection reduce retained query state. See [query analytics](docs/QUERY-ANALYTICS.md) for syntax, reusable APIs and explicit limitations.
 
 ## Build and run
 
