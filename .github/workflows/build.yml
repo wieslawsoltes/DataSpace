@@ -43,18 +43,6 @@ jobs:
         run: dotnet publish src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-browserwasm -o artifacts/publish -p:WasmShellWebAppBasePath=./
       - name: Stage static site
         run: python3 scripts/stage-site.py
-      - name: Verify all reusable libraries can be packaged
-        run: |
-          set -euo pipefail
-          for project in Core Query Storage Rendering Controls; do
-            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -o artifacts/packages
-          done
-          test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
-      - uses: actions/upload-artifact@v4
-        with:
-          name: reusable-libraries
-          path: artifacts/packages/*.nupkg
-          if-no-files-found: error
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -84,6 +72,18 @@ jobs:
           path: |
             artifacts/qa
             artifacts/server.log
+      - name: Verify all reusable libraries can be packaged
+        run: |
+          set -euo pipefail
+          for project in Core Query Storage Rendering Controls; do
+            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -o artifacts/packages
+          done
+          test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reusable-libraries
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: browser-app
