@@ -45,7 +45,7 @@ jobs:
           path: '**/TestResults/*.trx'
   application:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -102,6 +102,12 @@ jobs:
             dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -v:normal -o artifacts/packages 2>&1 | tee "artifacts/logs/pack-$project.log"
           done
           test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
+      - name: Compile package-only sample consumer on both Uno heads
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-packages.py 2>&1 | tee artifacts/logs/package-consumer.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -117,6 +123,7 @@ jobs:
           path: artifacts/packages/*.nupkg
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
         with:
           name: browser-app
           path: artifacts/site

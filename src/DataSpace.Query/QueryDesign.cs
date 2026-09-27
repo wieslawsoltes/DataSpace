@@ -19,14 +19,11 @@ public sealed class QueryDesign
     public int Offset { get; set; }
     public string Where { get; set; } = "";
     public string Having { get; set; } = "";
-
     public QueryDesignSource AddTable(DatabaseDocument document, string tableName)
     {
-        var table = document.Table(tableName);
-        var alias = table.Name;
+        var table = document.Table(tableName); var alias = table.Name;
         if (Sources.Any(s => Names.Equal(s.Alias, alias))) alias = Names.Available(table.Name + "_", Sources.Select(s => s.Alias));
         var source = new QueryDesignSource { Table = table.Name, Alias = alias, X = 24 + Sources.Count % 4 * 250, Y = 20 + Sources.Count / 4 * 260 };
-        // An existing relationship can suggest a join, but never silently invent one.
         foreach (var previous in Sources)
         {
             var relation = document.Relationships.FirstOrDefault(r => Names.Equal(r.ParentTable, previous.Table) && Names.Equal(r.ChildTable, table.Name));
@@ -34,16 +31,14 @@ public sealed class QueryDesign
             relation ??= document.Relationships.FirstOrDefault(r => Names.Equal(r.ChildTable, previous.Table) && Names.Equal(r.ParentTable, table.Name));
             if (relation is null) continue;
             source.Join = QueryJoinKind.Inner;
-            source.Condition = Field(previous.Alias, reverse ? relation.ChildField : relation.ParentField) + " = " + Field(alias, reverse ? relation.ParentField : relation.ChildField);
-            break;
+            source.Condition = Field(previous.Alias, reverse ? relation.ChildField : relation.ParentField) + " = " + Field(alias, reverse ? relation.ParentField : relation.ChildField); break;
         }
         Sources.Add(source); return source;
     }
     public QueryDesignColumn AddField(string alias, string field)
     {
         if (!Sources.Any(s => Names.Equal(s.Alias, alias))) throw new DataSpaceException("Unknown query source: " + alias);
-        var column = new QueryDesignColumn { Expression = field == "*" ? Names.Quote(alias) + ".*" : Field(alias, field) };
-        Columns.Add(column); return column;
+        var column = new QueryDesignColumn { Expression = field == "*" ? Names.Quote(alias) + ".*" : Field(alias, field) }; Columns.Add(column); return column;
     }
     public static string Field(string alias, string field) => Names.Quote(alias) + "." + Names.Quote(field);
     public string ToSql() => QueryDesignSql.Generate(this);
@@ -51,17 +46,35 @@ public sealed class QueryDesign
     public string Serialize() { _ = ToSql(); return JsonSerializer.Serialize(this, QueryDesignJsonContext.Default.QueryDesign); }
     public static QueryDesign Restore(string sql, string? state)
     {
-        // Stale or malformed view state must never replace SQL supplied by a user.
         if (!string.IsNullOrEmpty(state) && state.Length <= 524288)
         {
             try
             {
                 var design = JsonSerializer.Deserialize(state, QueryDesignJsonContext.Default.QueryDesign);
-                if (design is not null && design.ToSql() == sql) return design;
+                // Native multiline editors normalize line endings. Compare lexical content,
+                // not raw text, without ignoring any differences inside string/date literals.
+                if (design is not null && SameTokens(design.ToSql(), sql)) return design;
             }
             catch (Exception error) when (error is JsonException or DataSpaceException or ArgumentException or NullReferenceException) { }
         }
         return FromSql(sql);
+    }
+    private static bool SameTokens(string first, string second)
+    {
+        static List<Token> Tokens(string sql)
+        {
+            var tokens = SqlLexer.Read(sql); if (tokens.Count > 0 && tokens[^1].Kind == TokenKind.End) tokens.RemoveAt(tokens.Count - 1);
+            if (tokens.Count > 0 && tokens[^1].Kind == TokenKind.Symbol && tokens[^1].Text == ";") tokens.RemoveAt(tokens.Count - 1);
+            return tokens;
+        }
+        var left = Tokens(first); var right = Tokens(second); if (left.Count != right.Count) return false;
+        for (var index = 0; index < left.Count; index++)
+        {
+            var a = left[index]; var b = right[index]; if (a.Kind != b.Kind) return false;
+            var comparison = a.Kind is TokenKind.Word or TokenKind.QuotedName or TokenKind.Parameter ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!string.Equals(a.Text, b.Text, comparison)) return false;
+        }
+        return true;
     }
 }
 public sealed class QueryDesignSource
@@ -84,7 +97,7 @@ public sealed class QueryDesignColumn
     public List<string> Criteria { get; set; } = ["", ""];
 }
 
-/// <summary>Lossless semantic conversion for the engine's SELECT dialect. Action SQL is rejected, never replaced.</summary>
+/// <summary>Semantic conversion for the engine's SELECT dialect. Unsupported SQL is rejected, never replaced.</summary>
 public static class QueryDesignSql
 {
     public static QueryDesign Parse(string sql)
@@ -112,7 +125,6 @@ public static class QueryDesignSql
         for (var index = 0; index < plan.Order.Count; index++)
         {
             var order = plan.Order[index];
-            // Keep the actual ORDER expression, including aliases and ordinals, rather than resolving it incorrectly.
             design.Columns.Add(new() { Expression = SqlText.Format(order.Expression), Show = false, Sort = order.Descending ? QuerySort.Descending : QuerySort.Ascending, SortPriority = index + 1 });
         }
         return design;
@@ -138,57 +150,48 @@ public static class QueryDesignSql
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (column, i) in visible)
         {
-            if (column.Alias.Length > 0 && (!names.Add(column.Alias))) throw new DataSpaceException("Output aliases must be unique.");
+            if (column.Alias.Length > 0 && !names.Add(column.Alias)) throw new DataSpaceException("Output aliases must be unique.");
             if (column.Alias.Length > 0) Names.Validate(column.Alias);
             if (grouped && (expressions[i] == "*" || expressions[i].EndsWith(".*", StringComparison.Ordinal) || !SqlText.Parse(expressions[i]).GroupSafe(groups)))
                 throw new DataSpaceException("Every displayed column in a totals query must be grouped or aggregated.");
         }
-        var builder = new StringBuilder("SELECT ");
-        if (design.Distinct) builder.Append("DISTINCT ");
+        var builder = new StringBuilder("SELECT "); if (design.Distinct) builder.Append("DISTINCT ");
         if (design.Top is { } top) builder.Append("TOP ").Append(top).Append(' ');
         builder.AppendJoin(", ", visible.Select(p => expressions[p.i] + (p.c.Alias.Length == 0 ? "" : " AS " + Names.Quote(p.c.Alias))));
         for (var index = 0; index < design.Sources.Count; index++)
         {
             var source = design.Sources[index];
             builder.Append(index == 0 ? "\nFROM " : source.Join switch { QueryJoinKind.Inner => "\nINNER JOIN ", QueryJoinKind.Left => "\nLEFT JOIN ", _ => "\nCROSS JOIN " });
-            builder.Append(Names.Quote(source.Table));
-            if (!Names.Equal(source.Table, source.Alias)) builder.Append(" AS ").Append(Names.Quote(source.Alias));
+            builder.Append(Names.Quote(source.Table)); if (!Names.Equal(source.Table, source.Alias)) builder.Append(" AS ").Append(Names.Quote(source.Alias));
             if (index > 0 && source.Join != QueryJoinKind.Cross)
             {
-                var condition = SqlText.Parse(source.Condition);
-                if (condition.Aggregate) throw new DataSpaceException("Join conditions cannot contain aggregates.");
+                var condition = SqlText.Parse(source.Condition); if (condition.Aggregate) throw new DataSpaceException("Join conditions cannot contain aggregates.");
                 builder.Append(" ON ").Append(SqlText.Format(condition));
             }
         }
-        var pre = new List<string>(); var post = new List<string>();
-        var rows = design.Columns.Max(c => c.Criteria.Count);
+        var pre = new List<string>(); var post = new List<string>(); var rows = design.Columns.Max(c => c.Criteria.Count);
         var phases = new HashSet<bool>(); var activeRows = 0;
         for (var row = 0; row < rows; row++)
         {
             var before = new List<string>(); var after = new List<string>();
             for (var i = 0; i < design.Columns.Count; i++)
             {
-                var column = design.Columns[i]; var criterion = column.Criteria.ElementAtOrDefault(row);
-                if (string.IsNullOrWhiteSpace(criterion)) continue;
-                var afterGroup = grouped && column.Total != QueryTotal.Where;
-                phases.Add(afterGroup);
+                var column = design.Columns[i]; var criterion = column.Criteria.ElementAtOrDefault(row); if (string.IsNullOrWhiteSpace(criterion)) continue;
+                var afterGroup = grouped && column.Total != QueryTotal.Where; phases.Add(afterGroup);
                 (afterGroup ? after : before).Add(QueryCriteria.Compile(expressions[i], criterion));
             }
             if (before.Count + after.Count > 0) activeRows++;
             if (before.Count > 0) pre.Add("(" + string.Join(" AND ", before) + ")");
             if (after.Count > 0) post.Add("(" + string.Join(" AND ", after) + ")");
         }
-        if (phases.Count > 1 && activeRows > 1)
-            throw new DataSpaceException("OR rows cannot mix pre-group Where columns with aggregate criteria. Use the separate WHERE and HAVING expressions to make the grouping semantics explicit.");
+        if (phases.Count > 1 && activeRows > 1) throw new DataSpaceException("OR rows cannot mix pre-group Where columns with aggregate criteria. Use the separate WHERE and HAVING expressions to make the grouping semantics explicit.");
         Clause(builder, "WHERE", design.Where, pre);
         if (groups.Count > 0) builder.Append("\nGROUP BY ").AppendJoin(", ", groups.Select(SqlText.Format));
         Clause(builder, "HAVING", design.Having, post);
-        var orderings = design.Columns.Select((c, i) => (c, i)).Where(p => p.c.Sort != QuerySort.None)
-            .OrderBy(p => p.c.SortPriority > 0 ? p.c.SortPriority : 1000 + p.i).ToArray();
+        var orderings = design.Columns.Select((c, i) => (c, i)).Where(p => p.c.Sort != QuerySort.None).OrderBy(p => p.c.SortPriority > 0 ? p.c.SortPriority : 1000 + p.i).ToArray();
         if (orderings.Length > 0) builder.Append("\nORDER BY ").AppendJoin(", ", orderings.Select(p => expressions[p.i] + (p.c.Sort == QuerySort.Descending ? " DESC" : " ASC")));
         if (design.Offset > 0) builder.Append("\nOFFSET ").Append(design.Offset);
-        builder.Append(';');
-        var sql = builder.ToString(); _ = new SqlParser(sql).Parse(); return sql;
+        builder.Append(';'); var sql = builder.ToString(); _ = new SqlParser(sql).Parse(); return sql;
     }
     private static bool IsAggregateTotal(QueryTotal total) => total is QueryTotal.Sum or QueryTotal.Avg or QueryTotal.Min or QueryTotal.Max or QueryTotal.Count or QueryTotal.First or QueryTotal.Last;
     private static string Expression(QueryDesignColumn column)
@@ -201,7 +204,6 @@ public static class QueryDesignSql
         {
             if (column.Total != QueryTotal.None || column.Sort != QuerySort.None || column.Criteria.Any(s => !string.IsNullOrWhiteSpace(s)) || column.Alias.Length != 0)
                 throw new DataSpaceException("Wildcard columns cannot have totals, sorting, criteria or aliases. Add individual fields instead.");
-            // Parse as an actual projection, not by accepting arbitrary text ending in .*.
             if (new SqlParser("SELECT " + expression + ";").Parse() is not SelectStatement { Projections.Count: 1 } parsed || parsed.Projections[0].Wildcard is null)
                 throw new DataSpaceException("Invalid wildcard.");
             return expression;
@@ -210,8 +212,7 @@ public static class QueryDesignSql
     }
     private static void Clause(StringBuilder builder, string name, string expression, List<string> rows)
     {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(expression)) parts.Add(SqlText.Format(SqlText.Parse(expression)));
+        var parts = new List<string>(); if (!string.IsNullOrWhiteSpace(expression)) parts.Add(SqlText.Format(SqlText.Parse(expression)));
         if (rows.Count > 0) parts.Add("(" + string.Join(" OR ", rows) + ")");
         if (parts.Count > 0) builder.Append('\n').Append(name).Append(' ').AppendJoin(" AND ", parts.Select(p => "(" + p + ")"));
     }

@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace DataSpace.Controls;
 
-/// <summary>Reusable Access-style SELECT workspace: source cards, join properties and a QBE grid.</summary>
+/// <summary>Reusable SELECT workspace: draggable sources, joins, properties and an editable QBE grid.</summary>
 public sealed class QueryDesignerControl : UserControl, IDisposable
 {
     private readonly DatabaseDocument _document;
@@ -12,6 +12,7 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
     private readonly DrawingResources _drawing = new();
     private readonly Grid _scene = new() { Background = OfficeVisuals.Brush("E9E9E9") };
     private string _topText;
+    private string _baseline = "";
     private readonly StackPanel _properties = new() { Spacing = 5, Margin = new(10) };
     private readonly QueryDesignGrid _grid;
     private readonly TextBlock _message = OfficeVisuals.Text("Double-click a field to add it; drag table headers to arrange sources.", 11, "666666");
@@ -19,7 +20,7 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
     private (string Alias, string Field)? _joinStart;
     private bool _disposed, _invalidTop;
     public QueryDesign Design { get; }
-    public bool HasPendingChanges { get; private set; }
+    public bool HasPendingChanges => Fingerprint() != _baseline;
     public event Action? Changed;
     public QueryDesignerControl(DatabaseDocument document, QueryDesign design)
     {
@@ -30,26 +31,28 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
         var toolbar = OfficeVisuals.Row(tables,
             OfficeVisuals.Button("Add Table", () => { if (tables.SelectedItem is string name) { _selected = Design.AddTable(document, name); ChangedDesign(); BuildCards(); BuildProperties(); } }, "table"),
             OfficeVisuals.Button("Add Column", () => { Design.Columns.Add(new() { Expression = "1" }); _grid.Rebuild(); ChangedDesign(); }, "new"),
-            OfficeVisuals.Button("Add OR Row", () => _grid.AddCriteriaRow()),
-            OfficeVisuals.Button("Totals", () => _grid.ToggleTotals(), "totals"));
+            OfficeVisuals.Button("Add OR Row", () => _grid.AddCriteriaRow()), OfficeVisuals.Button("Totals", () => _grid.ToggleTotals(), "totals"));
         toolbar.Margin = new(8); OfficeVisuals.Add(root, EditorVisuals.Scroll(toolbar), columnSpan: 2);
         _scene.Children.Add(_lines); _scene.Children.Add(_cards); _lines.Painter = DrawJoins;
-        OfficeVisuals.Add(root, EditorVisuals.Scroll(_scene), 1);
-        OfficeVisuals.Add(root, OfficeVisuals.Border(EditorVisuals.Scroll(_properties), "F7F7F7"), 1, 1);
+        OfficeVisuals.Add(root, EditorVisuals.Scroll(_scene), 1); OfficeVisuals.Add(root, OfficeVisuals.Border(EditorVisuals.Scroll(_properties), "F7F7F7"), 1, 1);
         _grid = new QueryDesignGrid(design); _grid.Changed += ChangedDesign;
         var gridScroll = EditorVisuals.Scroll(_grid); gridScroll.MaxHeight = 350;
         OfficeVisuals.Add(root, OfficeVisuals.Border(gridScroll, "FFFFFF"), 2, columnSpan: 2);
         _message.Margin = new(8, 5, 8, 5); _message.TextWrapping = TextWrapping.Wrap; OfficeVisuals.Add(root, _message, 3, columnSpan: 2);
-        Content = root; BuildCards(); BuildProperties();
-        AutomationProperties.SetAutomationId(this, "QueryDesigner");
+        Content = root; BuildCards(); BuildProperties(); MarkCommitted(); AutomationProperties.SetAutomationId(this, "QueryDesigner");
     }
+    private string Fingerprint() => FieldValues.Key(new[]
+    {
+        _topText, Design.Top?.ToString(), Design.Offset.ToString(), Design.Distinct.ToString(), Design.Where, Design.Having,
+        FieldValues.Key(Design.Sources.Select(s => FieldValues.Key(new[] { s.Table, s.Alias, s.Join.ToString(), s.Condition, s.X.ToString("R", FieldValues.Culture), s.Y.ToString("R", FieldValues.Culture) }))),
+        FieldValues.Key(Design.Columns.Select(c => FieldValues.Key(new[] { c.Expression, c.Alias, c.Show.ToString(), c.Total.ToString(), c.Sort.ToString(), c.SortPriority.ToString(), FieldValues.Key(c.Criteria) })))
+    });
     public string ToSql()
     {
-        if (_invalidTop) throw new DataSpaceException("Top Values must be blank or a non-negative integer.");
-        return Design.ToSql();
+        if (_invalidTop) throw new DataSpaceException("Top Values must be blank or a non-negative integer."); return Design.ToSql();
     }
-    public void MarkCommitted() => HasPendingChanges = false;
-    private void ChangedDesign() { HasPendingChanges = true; Changed?.Invoke(); _lines.Invalidate(); }
+    public void MarkCommitted() => _baseline = Fingerprint();
+    private void ChangedDesign() { Changed?.Invoke(); _lines.Invalidate(); }
     private void BuildCards()
     {
         _cards.Children.Clear(); ResizeScene();
@@ -62,8 +65,7 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
             header.PointerPressed += (_, e) =>
             {
                 var point = e.GetCurrentPoint(_cards); if (!point.Properties.IsLeftButtonPressed) return;
-                _selected = source; BuildProperties(); origin = point.Position; x = source.X; y = source.Y; dragging = true;
-                header.CapturePointer(e.Pointer); e.Handled = true;
+                _selected = source; BuildProperties(); origin = point.Position; x = source.X; y = source.Y; dragging = true; header.CapturePointer(e.Pointer); e.Handled = true;
             };
             header.PointerMoved += (_, e) =>
             {
@@ -71,18 +73,15 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
                 source.X = Math.Clamp(x + point.X - origin.X, 0, 9780); source.Y = Math.Clamp(y + point.Y - origin.Y, 0, 9750);
                 Canvas.SetLeft(card, source.X); Canvas.SetTop(card, source.Y); ResizeScene(); ChangedDesign(); e.Handled = true;
             };
-            header.PointerReleased += (_, e) => { dragging = false; header.ReleasePointerCapture(e.Pointer); };
-            header.PointerCaptureLost += (_, _) => dragging = false;
-            content.Children.Add(header);
-            var list = new StackPanel();
+            header.PointerReleased += (_, e) => { dragging = false; header.ReleasePointerCapture(e.Pointer); }; header.PointerCaptureLost += (_, _) => dragging = false;
+            content.Children.Add(header); var list = new StackPanel();
             var table = _document.Tables.FirstOrDefault(t => Names.Equal(t.Name, source.Table));
             foreach (var field in new[] { "*" }.Concat(table?.Fields.Select(f => f.Name) ?? []))
             {
                 var button = OfficeVisuals.Button(field, () => SelectJoinField(source, field));
                 button.Height = 27; button.HorizontalAlignment = HorizontalAlignment.Stretch; button.HorizontalContentAlignment = HorizontalAlignment.Left;
                 AutomationProperties.SetName(button, source.Alias + "." + field);
-                button.DoubleTapped += (_, e) => { _joinStart = null; Design.AddField(source.Alias, field); _grid.Rebuild(); ChangedDesign(); e.Handled = true; };
-                list.Children.Add(button);
+                button.DoubleTapped += (_, e) => { _joinStart = null; Design.AddField(source.Alias, field); _grid.Rebuild(); ChangedDesign(); e.Handled = true; }; list.Children.Add(button);
             }
             var fields = EditorVisuals.Scroll(list); fields.MaxHeight = 194; content.Children.Add(fields);
             Canvas.SetLeft(card, source.X); Canvas.SetTop(card, source.Y); _cards.Children.Add(card);
@@ -96,15 +95,13 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
     }
     private void SelectJoinField(QueryDesignSource source, string field)
     {
-        _selected = source; BuildProperties();
-        if (field == "*") { _joinStart = null; return; }
+        _selected = source; BuildProperties(); if (field == "*") { _joinStart = null; return; }
         if (_joinStart is { } start && !Names.Equal(start.Alias, source.Alias))
         {
             var previous = Design.Sources.FindIndex(s => Names.Equal(s.Alias, start.Alias)); var current = Design.Sources.IndexOf(source);
             var later = Design.Sources[Math.Max(previous, current)];
             var condition = QueryDesign.Field(start.Alias, start.Field) + " = " + QueryDesign.Field(source.Alias, field);
-            if (later.Join == QueryJoinKind.Cross) { later.Join = QueryJoinKind.Inner; later.Condition = condition; }
-            else later.Condition = "(" + later.Condition + ") AND (" + condition + ")";
+            if (later.Join == QueryJoinKind.Cross) { later.Join = QueryJoinKind.Inner; later.Condition = condition; } else later.Condition = "(" + later.Condition + ") AND (" + condition + ")";
             _joinStart = null; ChangedDesign(); BuildProperties(); _message.Text = "Join added. Select a source header to edit its type or ON expression.";
         }
         else { _joinStart = (source.Alias, field); _message.Text = "Select a field in another source to join with " + source.Alias + "." + field + "; double-click to add a result column."; }
@@ -128,32 +125,29 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
         var top = OfficeVisuals.Input(_topText, "All records");
         top.TextChanged += (_, _) =>
         {
+            if (!top.IsLoaded || _topText == top.Text) return;
             _topText = top.Text; _invalidTop = false;
             if (top.Text.Length == 0) Design.Top = null;
             else if (int.TryParse(top.Text, out var value) && value >= 0) Design.Top = value;
-            else { _invalidTop = true; _message.Text = "Top Values must be blank or a non-negative integer."; }
-            ChangedDesign();
+            else { _invalidTop = true; _message.Text = "Top Values must be blank or a non-negative integer."; } ChangedDesign();
         };
         EditorVisuals.Labeled(_properties, "Top Values", top);
         void Text(string label, string value, Action<string> setter)
         {
-            var input = OfficeVisuals.Input(value); input.AcceptsReturn = true; input.TextWrapping = TextWrapping.Wrap; input.MaxHeight = 110;
-            input.TextChanged += (_, _) => { setter(input.Text); ChangedDesign(); }; EditorVisuals.Labeled(_properties, label, input);
+            var previous = value; var input = OfficeVisuals.Input(value); input.AcceptsReturn = true; input.TextWrapping = TextWrapping.Wrap; input.MaxHeight = 110;
+            input.TextChanged += (_, _) => { if (!input.IsLoaded || input.Text == previous) return; previous = input.Text; setter(previous); ChangedDesign(); }; EditorVisuals.Labeled(_properties, label, input);
         }
-        Text("WHERE (before grouping)", Design.Where, value => Design.Where = value);
-        Text("HAVING (after grouping)", Design.Having, value => Design.Having = value);
+        Text("WHERE (before grouping)", Design.Where, value => Design.Where = value); Text("HAVING (after grouping)", Design.Having, value => Design.Having = value);
         var help = OfficeVisuals.Text("Imported WHERE/HAVING expressions are preserved here. Grid criteria are additional conditions.", 11, "666666"); help.TextWrapping = TextWrapping.Wrap; _properties.Children.Add(help);
-        if (_selected is not { } source) return;
-        _properties.Children.Add(OfficeVisuals.Text("Source: " + source.Alias, 14, bold: true));
+        if (_selected is not { } source) return; _properties.Children.Add(OfficeVisuals.Text("Source: " + source.Alias, 14, bold: true));
         if (Design.Sources.IndexOf(source) > 0)
         {
             var join = OfficeVisuals.Combo(Enum.GetNames<QueryJoinKind>(), source.Join.ToString());
-            join.SelectionChanged += (_, _) => { if (join.SelectedItem is string value) { source.Join = Enum.Parse<QueryJoinKind>(value); ChangedDesign(); } };
+            join.SelectionChanged += (_, _) => { if (join.IsLoaded && join.SelectedItem is string value && value != source.Join.ToString()) { source.Join = Enum.Parse<QueryJoinKind>(value); ChangedDesign(); } };
             EditorVisuals.Labeled(_properties, "Join Type", join); Text("ON expression", source.Condition, value => source.Condition = value);
         }
         _properties.Children.Add(OfficeVisuals.Button("Remove Source", () =>
         {
-            // Keep references visible so removal cannot silently drop filters/projections.
             Design.Sources.Remove(source); _selected = null; _joinStart = null; ChangedDesign(); BuildCards(); BuildProperties();
             _message.Text = "Source removed. Review any remaining field and join references before running.";
         }, "delete"));
@@ -161,7 +155,7 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
     public void Dispose() { if (_disposed) return; _disposed = true; _lines.Painter = null; _drawing.Dispose(); }
 }
 
-/// <summary>Standalone native Uno QBE grid; field expressions, aliases, grouping, sorting and OR rows.</summary>
+/// <summary>Standalone native QBE grid: field expressions, aliases, grouping, sorting and OR rows.</summary>
 public sealed class QueryDesignGrid : UserControl
 {
     private readonly QueryDesign _design;
@@ -172,8 +166,7 @@ public sealed class QueryDesignGrid : UserControl
     public QueryDesignGrid(QueryDesign design)
     {
         _design = design; _totals = design.Columns.Any(c => c.Total != QueryTotal.None);
-        _criteriaRows = Math.Max(2, design.Columns.Select(c => c.Criteria.Count).DefaultIfEmpty(2).Max());
-        Content = _cells; Rebuild();
+        _criteriaRows = Math.Max(2, design.Columns.Select(c => c.Criteria.Count).DefaultIfEmpty(2).Max()); Content = _cells; Rebuild();
     }
     public void AddCriteriaRow()
     { if (_criteriaRows >= 32) return; _criteriaRows++; foreach (var column in _design.Columns) while (column.Criteria.Count < _criteriaRows) column.Criteria.Add(""); Rebuild(); Changed?.Invoke(); }
@@ -183,8 +176,7 @@ public sealed class QueryDesignGrid : UserControl
         _cells.Children.Clear(); _cells.RowDefinitions.Clear(); _cells.ColumnDefinitions.Clear();
         var labels = new List<string> { "", "Field:", "Alias:", "Sort:", "Sort Order:", "Show:" }; if (_totals) labels.Add("Total:");
         labels.Add("Criteria:"); labels.AddRange(Enumerable.Repeat("or:", _criteriaRows - 1));
-        foreach (var label in labels) _cells.RowDefinitions.Add(new() { Height = new(32) });
-        _cells.ColumnDefinitions.Add(new() { Width = new(90) });
+        foreach (var label in labels) _cells.RowDefinitions.Add(new() { Height = new(32) }); _cells.ColumnDefinitions.Add(new() { Width = new(90) });
         for (var row = 0; row < labels.Count; row++)
         { var text = OfficeVisuals.Text(labels[row], 12, bold: true); text.Margin = new(8, 0, 0, 0); OfficeVisuals.Add(_cells, OfficeVisuals.Border(text, "F1F1F1", thickness: new(0, 0, 1, 1)), row); }
         for (var index = 0; index < _design.Columns.Count; index++)
@@ -196,22 +188,21 @@ public sealed class QueryDesignGrid : UserControl
                 OfficeVisuals.Add(_cells, OfficeVisuals.Border(element, thickness: new(0, 0, 1, 1)), row, cellColumn);
             }
             void Text(string value, int row, string label, Action<string> assign)
-            { var input = OfficeVisuals.Input(value); input.TextChanged += (_, _) => { assign(input.Text); Changed?.Invoke(); }; Place(input, row, label); }
-            var actions = OfficeVisuals.Row(OfficeVisuals.Text("Column " + cellColumn, 11),
-                OfficeVisuals.Button("←", () => Move(column, -1)), OfficeVisuals.Button("→", () => Move(column, 1)),
-                OfficeVisuals.Button("×", () => { _design.Columns.Remove(column); Rebuild(); Changed?.Invoke(); })); Place(actions, 0, "Column actions");
-            Text(column.Expression, 1, "Field expression", value => column.Expression = value);
-            Text(column.Alias, 2, "Output alias", value => column.Alias = value);
+            {
+                var previous = value; var input = OfficeVisuals.Input(value);
+                input.TextChanged += (_, _) => { if (!input.IsLoaded || input.Text == previous) return; previous = input.Text; assign(previous); Changed?.Invoke(); }; Place(input, row, label);
+            }
+            var actions = OfficeVisuals.Row(OfficeVisuals.Text("Column " + cellColumn, 11), OfficeVisuals.Button("←", () => Move(column, -1)), OfficeVisuals.Button("→", () => Move(column, 1)), OfficeVisuals.Button("×", () => { _design.Columns.Remove(column); Rebuild(); Changed?.Invoke(); })); Place(actions, 0, "Column actions");
+            Text(column.Expression, 1, "Field expression", value => column.Expression = value); Text(column.Alias, 2, "Output alias", value => column.Alias = value);
             var sort = OfficeVisuals.Combo(Enum.GetNames<QuerySort>(), column.Sort.ToString());
-            sort.SelectionChanged += (_, _) => { if (sort.SelectedItem is string value) { column.Sort = Enum.Parse<QuerySort>(value); Changed?.Invoke(); } }; Place(sort, 3, "Sort");
+            sort.SelectionChanged += (_, _) => { if (sort.IsLoaded && sort.SelectedItem is string value && value != column.Sort.ToString()) { column.Sort = Enum.Parse<QuerySort>(value); Changed?.Invoke(); } }; Place(sort, 3, "Sort");
             var priority = new NumberBox { Value = column.SortPriority, Minimum = 0, Maximum = 256, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
-            priority.ValueChanged += (_, _) => { if (double.IsFinite(priority.Value)) { column.SortPriority = (int)priority.Value; Changed?.Invoke(); } }; Place(priority, 4, "Sort order (zero uses column order)");
-            Place(EditorVisuals.Check("", column.Show, value => { column.Show = value; Changed?.Invoke(); }), 5, "Show");
-            var first = 6;
+            priority.ValueChanged += (_, _) => { if (priority.IsLoaded && double.IsFinite(priority.Value) && column.SortPriority != (int)priority.Value) { column.SortPriority = (int)priority.Value; Changed?.Invoke(); } }; Place(priority, 4, "Sort order (zero uses column order)");
+            Place(EditorVisuals.Check("", column.Show, value => { column.Show = value; Changed?.Invoke(); }), 5, "Show"); var first = 6;
             if (_totals)
             {
                 var total = OfficeVisuals.Combo(Enum.GetNames<QueryTotal>(), column.Total.ToString());
-                total.SelectionChanged += (_, _) => { if (total.SelectedItem is string value) { column.Total = Enum.Parse<QueryTotal>(value); Changed?.Invoke(); } }; Place(total, first++, "Total");
+                total.SelectionChanged += (_, _) => { if (total.IsLoaded && total.SelectedItem is string value && value != column.Total.ToString()) { column.Total = Enum.Parse<QueryTotal>(value); Changed?.Invoke(); } }; Place(total, first++, "Total");
             }
             while (column.Criteria.Count < _criteriaRows) column.Criteria.Add("");
             for (var criteria = 0; criteria < _criteriaRows; criteria++)
