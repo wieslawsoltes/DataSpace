@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DataSpace.Core/DataSpace.Core.csproj" />
+    <Project Path="src/DataSpace.Query/DataSpace.Query.csproj" />
+    <Project Path="src/DataSpace.Storage/DataSpace.Storage.csproj" />
+    <Project Path="src/DataSpace.Rendering/DataSpace.Rendering.csproj" />
+    <Project Path="src/DataSpace.Controls/DataSpace.Controls.csproj" />
+    <Project Path="src/DataSpace.App/DataSpace.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DataSpace.Tests/DataSpace.Tests.csproj" />
+  </Folder>
+</Solution>
