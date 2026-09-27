@@ -1,61 +1,110 @@
 namespace DataSpace.Core;
 
-/// <summary>A single-writer, copy-on-write transactional document with bounded undo/redo.</summary>
+public sealed record RecordEdit(string RecordId, string Field, string? Value);
+
+/// <summary>Single-writer transactional document with validated edits and bounded undo/redo.</summary>
 public sealed class DatabaseWorkspace
 {
     private readonly LinkedList<(DatabaseDocument Document, string Label)> _undo = new();
     private readonly Stack<(DatabaseDocument Document, string Label)> _redo = new();
     private bool _editing;
+    private int _historyLimit = 32;
     public DatabaseDocument Document { get; private set; }
-    public int HistoryLimit { get; init; } = 32;
+    public int HistoryLimit { get => _historyLimit; init => _historyLimit = value >= 0 ? value : throw new ArgumentOutOfRangeException(nameof(value)); }
     public bool CanUndo => _undo.Count != 0;
     public bool CanRedo => _redo.Count != 0;
     public string UndoLabel => _undo.Last?.Value.Label ?? "";
     public event EventHandler? Changed;
     public DatabaseWorkspace(DatabaseDocument document) { Document = DocumentCodec.Clone(document); }
-
-    /// <summary>Mutate only the supplied draft. Constraint errors leave the live document and history unchanged.</summary>
-    public void Edit(string label, Action<DatabaseDocument> edit, long? expectedRevision = null)
+    private void CheckRevision(long? revision)
     {
         if (_editing) throw new DataSpaceException("Nested transactions are not supported.");
-        if (expectedRevision is { } revision && revision != Document.Revision) throw new DataSpaceException("The database changed. Refresh before applying this edit.");
-        _editing = true;
+        if (revision is { } value && value != Document.Revision) throw new DataSpaceException("The database changed. Refresh before applying this edit.");
+    }
+    private void Publish(DatabaseDocument draft, string label)
+    {
+        draft.Revision = checked(Document.Revision + 1);
+        _undo.AddLast((Document, label));
+        while (_undo.Count > HistoryLimit) _undo.RemoveFirst();
+        _redo.Clear(); Document = draft;
+    }
+    /// <summary>Mutate only the supplied draft. Failures leave the live document and history unchanged.</summary>
+    public void Edit(string label, Action<DatabaseDocument> edit, long? expectedRevision = null)
+    {
+        ArgumentNullException.ThrowIfNull(edit); CheckRevision(expectedRevision); _editing = true;
         try
         {
-            var draft = DocumentCodec.Clone(Document);
-            edit(draft);
-            SchemaValidator.Validate(draft);
-            draft.Revision = checked(Document.Revision + 1);
-            _undo.AddLast((Document, label));
-            while (_undo.Count > HistoryLimit) _undo.RemoveFirst();
-            _redo.Clear();
-            Document = draft;
+            var draft = DocumentSnapshot.Copy(Document);
+            edit(draft); SchemaValidator.Validate(draft); Publish(draft, label);
         }
         finally { _editing = false; }
         Changed?.Invoke(this, EventArgs.Empty);
     }
+    /// <summary>Atomic cell/range edits. Copies touched records rather than every record in the database.</summary>
+    public void UpdateRecords(string label, string tableName, IReadOnlyList<RecordEdit> edits, long? expectedRevision = null)
+    {
+        ArgumentNullException.ThrowIfNull(edits); CheckRevision(expectedRevision);
+        if (edits.Count == 0) return;
+        var source = Document.Table(tableName);
+        var fields = edits.Select(e => source.Field(e.Field).Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Cascade closure can touch arbitrary tables. Keep the fully detached generic transaction for that path.
+        if (Document.Relationships.Any(r => r.EnforceIntegrity && r.CascadeUpdate && Names.Equal(r.ParentTable, source.Name) && fields.Contains(r.ParentField)))
+        {
+            Edit(label, document =>
+            {
+                foreach (var group in edits.GroupBy(e => e.RecordId))
+                {
+                    var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var edit in group) values[edit.Field] = edit.Value;
+                    RecordOperations.Update(document, tableName, group.Key, values);
+                }
+            }, expectedRevision);
+            return;
+        }
+        var changed = false; _editing = true;
+        try
+        {
+            var draft = DocumentSnapshot.Copy(Document, true); var table = draft.Table(tableName);
+            var positions = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (var index = 0; index < table.Records.Count; index++) positions.Add(table.Records[index].Id, index);
+            var copied = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var edit in edits)
+            {
+                if (!positions.TryGetValue(edit.RecordId, out var index)) throw new DataSpaceException("The record no longer exists.");
+                var field = table.Field(edit.Field); var normalized = FieldValues.Normalize(field, edit.Value);
+                var row = table.Records[index]; if (row[field.Name] == normalized) continue;
+                if (copied.Add(edit.RecordId)) table.Records[index] = row = DocumentSnapshot.CopyRecord(row);
+                row[field.Name] = normalized; changed = true;
+                if (field.Type == FieldType.AutoNumber && normalized is not null)
+                {
+                    var number = long.Parse(normalized, FieldValues.Culture);
+                    if (number == long.MaxValue) throw new DataSpaceException("AutoNumber capacity exceeded.");
+                    table.NextAutoNumber = Math.Max(table.NextAutoNumber, number + 1);
+                }
+            }
+            if (changed) { RecordEditValidation.Validate(draft, table, fields); Publish(draft, label); }
+        }
+        finally { _editing = false; }
+        if (changed) Changed?.Invoke(this, EventArgs.Empty);
+    }
     public void Undo()
     {
-        if (_undo.Last is not { } item) return;
-        _redo.Push((Document, item.Value.Label));
-        var next = DocumentCodec.Clone(item.Value.Document);
-        next.Revision = checked(Document.Revision + 1);
-        _undo.RemoveLast(); Document = next;
+        CheckRevision(null); if (_undo.Last is not { } item) return;
+        var next = DocumentSnapshot.Copy(item.Value.Document); next.Revision = checked(Document.Revision + 1);
+        _redo.Push((Document, item.Value.Label)); _undo.RemoveLast(); Document = next;
         Changed?.Invoke(this, EventArgs.Empty);
     }
     public void Redo()
     {
-        if (!_redo.TryPop(out var item)) return;
-        _undo.AddLast((Document, item.Label));
-        var next = DocumentCodec.Clone(item.Document);
-        next.Revision = checked(Document.Revision + 1); Document = next;
+        CheckRevision(null); if (!_redo.TryPeek(out var item)) return;
+        var next = DocumentSnapshot.Copy(item.Document); next.Revision = checked(Document.Revision + 1);
+        _redo.Pop(); _undo.AddLast((Document, item.Label)); while (_undo.Count > HistoryLimit) _undo.RemoveFirst(); Document = next;
         Changed?.Invoke(this, EventArgs.Empty);
     }
     public void Replace(DatabaseDocument document)
     {
-        var next = DocumentCodec.Clone(document);
-        Document = next; _undo.Clear(); _redo.Clear();
-        Changed?.Invoke(this, EventArgs.Empty);
+        CheckRevision(null); var next = DocumentCodec.Clone(document);
+        Document = next; _undo.Clear(); _redo.Clear(); Changed?.Invoke(this, EventArgs.Empty);
     }
 }
 
@@ -73,23 +122,20 @@ public static class RecordOperations
             if (field.Type == FieldType.Guid && value is null) value = System.Guid.NewGuid().ToString();
             record[field.Name] = FieldValues.Normalize(field, value);
         }
-        table.Records.Add(record);
-        return record;
+        table.Records.Add(record); return record;
     }
     public static void Update(DatabaseDocument document, string tableName, string recordId, IReadOnlyDictionary<string, string?> values)
     {
         var table = document.Table(tableName);
-        var record = table.Records.FirstOrDefault(r => r.Id == recordId) ?? throw new DataSpaceException("The record no longer exists.");
+        if (!table.Records.Any(r => r.Id == recordId)) throw new DataSpaceException("The record no longer exists.");
         var pending = new Queue<(string Table, string Id, string Field, string? Value)>();
         foreach (var (field, value) in values) pending.Enqueue((tableName, recordId, table.Field(field).Name, value));
         var updates = 0;
         while (pending.TryDequeue(out var update))
         {
             if (++updates > 100000) throw new DataSpaceException("Cascade update limit exceeded.");
-            var target = document.Table(update.Table);
-            var row = target.Records.First(r => r.Id == update.Id);
-            var value = FieldValues.Normalize(target.Field(update.Field), update.Value);
-            var previous = row[update.Field];
+            var target = document.Table(update.Table); var row = target.Records.First(r => r.Id == update.Id);
+            var value = FieldValues.Normalize(target.Field(update.Field), update.Value); var previous = row[update.Field];
             if (Names.Equal(previous, value)) { row[update.Field] = value; continue; }
             foreach (var relation in document.Relationships.Where(r => r.EnforceIntegrity && r.CascadeUpdate && Names.Equal(r.ParentTable, target.Name) && Names.Equal(r.ParentField, update.Field)))
                 if (previous is not null)
@@ -105,13 +151,11 @@ public static class RecordOperations
         while (pending.TryDequeue(out var item))
         {
             if (!visited.Add(item.Table + ":" + item.Id)) continue;
-            var table = document.Table(item.Table);
-            var record = table.Records.FirstOrDefault(r => r.Id == item.Id);
+            var table = document.Table(item.Table); var record = table.Records.FirstOrDefault(r => r.Id == item.Id);
             if (record is null) continue;
             foreach (var relation in document.Relationships.Where(r => r.EnforceIntegrity && r.CascadeDelete && Names.Equal(r.ParentTable, table.Name)))
                 if (record[relation.ParentField] is { } key)
-                    foreach (var child in document.Table(relation.ChildTable).Records.Where(r => Names.Equal(r[relation.ChildField], key)).ToArray())
-                        pending.Enqueue((relation.ChildTable, child.Id));
+                    foreach (var child in document.Table(relation.ChildTable).Records.Where(r => Names.Equal(r[relation.ChildField], key)).ToArray()) pending.Enqueue((relation.ChildTable, child.Id));
             table.Records.Remove(record);
         }
     }
@@ -128,8 +172,7 @@ public static class RecordOperations
     }
     public static void RenameField(DatabaseDocument document, string tableName, string oldName, string newName)
     {
-        Names.Validate(newName);
-        var table = document.Table(tableName);
+        Names.Validate(newName); var table = document.Table(tableName);
         if (!Names.Equal(oldName, newName) && table.Fields.Any(f => Names.Equal(f.Name, newName))) throw new DataSpaceException("Field name already exists.");
         table.Field(oldName).Name = newName;
         foreach (var row in table.Records) { var value = row[oldName]; row.Values.Remove(oldName); row[newName] = value; }
@@ -143,6 +186,5 @@ public static class RecordOperations
             foreach (var control in form.Controls.Where(c => Names.Equal(c.Field, oldName))) control.Field = newName;
         foreach (var report in document.Reports.Where(r => Names.Equal(r.Source, tableName)))
             for (var i = 0; i < report.Fields.Count; i++) if (Names.Equal(report.Fields[i], oldName)) report.Fields[i] = newName;
-        // SQL text is deliberately not rewritten by substring; query dependencies must be reviewed after schema changes.
     }
 }

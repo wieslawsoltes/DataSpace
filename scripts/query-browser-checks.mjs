@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 
-/** Exercise the actual Uno controls with physical pointer/keyboard input, not a test-only command API. */
+/** Real keyboard/pointer interactions against Uno's accessibility peers and native text editors. */
 export async function queryBrowserChecks(page, baseURL, screenshots, ready) {
     let checks = 0;
     async function enableAccessibility() {
@@ -17,10 +17,12 @@ export async function queryBrowserChecks(page, baseURL, screenshots, ready) {
         return bounds;
     }
     async function button(name, last = false) {
-        // Uno's semantic DOM is intentionally pointer-transparent; use its bounds to click the real canvas.
-        const bounds = await target('button', name, last);
-        await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-        await page.waitForTimeout(200);
+        const matches = page.getByRole('button', { name, exact: true });
+        const match = last ? matches.last() : matches.first();
+        await target('button', name, last);
+        // Keyboard activation also verifies that semantic peers route to the real control.
+        await match.press('Enter');
+        await page.waitForTimeout(250);
     }
     async function edit(name, value) {
         const bounds = await target('textbox', name);
@@ -101,5 +103,6 @@ export async function queryBrowserChecks(page, baseURL, screenshots, ready) {
         return checks;
     } finally {
         await writeFile(screenshots + '/query-accessibility.txt', await page.locator('body').ariaSnapshot());
+        await writeFile(screenshots + '/query-peer-bounds.json', JSON.stringify(await page.locator('[role="button"]').evaluateAll(elements => elements.map(element => ({name: element.getAttribute('aria-label'), text: element.textContent, rect: element.getBoundingClientRect().toJSON()}))), null, 2));
     }
 }
