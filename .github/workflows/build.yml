@@ -15,6 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Archive exact tested source
+        run: |
+          mkdir -p artifacts
+          git archive --format=zip --prefix=DataSpace/ HEAD -o artifacts/DataSpace-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-snapshot
+          path: artifacts/DataSpace-source.zip
+          if-no-files-found: error
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
@@ -38,11 +47,19 @@ jobs:
       - name: Install WebAssembly toolchain
         run: dotnet workload install wasm-tools --skip-manifest-update
       - name: Compile desktop application
-        run: dotnet build src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/logs
+          dotnet build src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-desktop 2>&1 | tee artifacts/logs/desktop.log
       - name: Publish browser application
         id: publish
-        run: dotnet publish src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-browserwasm -o artifacts/publish -p:WasmShellWebAppBasePath=./
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-browserwasm -o artifacts/publish -p:WasmShellWebAppBasePath=./ 2>&1 | tee artifacts/logs/browser-publish.log
       - name: Stage static site
+        id: stage
         run: python3 scripts/stage-site.py
       - uses: actions/setup-node@v4
         with:
@@ -55,7 +72,9 @@ jobs:
       - name: Test browser persistence and launch the real Uno app
         env:
           DATASPACE_SCREENSHOTS: ${{ github.workspace }}/artifacts/qa
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p artifacts/server/DataSpace
           cp -a artifacts/site/. artifacts/server/DataSpace/
           printf '<!doctype html><title>DataSpace storage test</title>' > artifacts/server/DataSpace/storage-test.html
@@ -63,25 +82,27 @@ jobs:
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
           for retry in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/DataSpace/storage-test.html > /dev/null && break || sleep 1; done
-          node scripts/browser-smoke.mjs
+          node scripts/browser-smoke.mjs 2>&1 | tee artifacts/logs/browser-tests.log
           mkdir -p artifacts/site/qa
           cp artifacts/qa/workspace.png artifacts/site/qa/workspace.png
+      - name: Verify all reusable libraries can be packaged
+        id: packages
+        if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in Core Query Storage Rendering Controls; do
+            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -v:normal -o artifacts/packages 2>&1 | tee "artifacts/logs/pack-$project.log"
+          done
+          test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: browser-diagnostics
           path: |
             artifacts/qa
+            artifacts/logs
             artifacts/server.log
-      - name: Verify all reusable libraries can be packaged
-        id: packages
-        if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
-        run: |
-          set -euo pipefail
-          for project in Core Query Storage Rendering Controls; do
-            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -o artifacts/packages
-          done
-          test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
         with:
