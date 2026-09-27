@@ -1,0 +1,17 @@
+<Project Sdk="Uno.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-browserwasm;net10.0-desktop</TargetFrameworks>
+    <UnoSingleProject>true</UnoSingleProject>
+    <OutputType>Library</OutputType>
+    <GenerateLibraryLayout>true</GenerateLibraryLayout>
+    <UnoFeatures>SkiaRenderer;</UnoFeatures>
+    <Description>Reusable Office-style Uno ribbon, navigation, datasheet and database designer controls.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../DataSpace.Core/DataSpace.Core.csproj" />
+    <ProjectReference Include="../DataSpace.Query/DataSpace.Query.csproj" />
+    <ProjectReference Include="../DataSpace.Storage/DataSpace.Storage.csproj" />
+    <ProjectReference Include="../DataSpace.Rendering/DataSpace.Rendering.csproj" />
+    <PackageReference Include="SkiaSharp.Views.Uno.WinUI" Version="4.152.1" />
+  </ItemGroup>
+</Project>

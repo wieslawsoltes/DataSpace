@@ -6,26 +6,34 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  build:
+  engine:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - name: Test database and query engine
+      - name: Test database, SQL and storage
         run: dotnet test tests/DataSpace.Tests/DataSpace.Tests.csproj -c Release --logger 'trx;LogFileName=tests.trx'
-      - name: Verify Uno project conventions
-        if: always()
-        run: |
-          dotnet new install Uno.Templates@6.7.30
-          dotnet new unoapp -preset blank -platforms wasm desktop -o /tmp/UnoProbe --skip-restore
-          find /tmp/UnoProbe -name '*.csproj' -o -name 'global.json' -o -name '*Program.cs' -o -name 'App.xaml' | xargs -r -n 1 sh -c 'echo FILE: "$0"; cat "$0"'
-          dotnet new unolib -o /tmp/UnoLibrary || true
-          find /tmp/UnoLibrary -name '*.csproj' -o -name 'global.json' | xargs -r -n 1 sh -c 'echo FILE: "$0"; cat "$0"'
+      - name: Compile reusable renderers
+        run: dotnet build src/DataSpace.Rendering/DataSpace.Rendering.csproj -c Release
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-results
           path: '**/TestResults/*.trx'
+  uno:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install WebAssembly toolchain
+        run: dotnet workload install wasm-tools --skip-manifest-update
+      - name: Compile reusable Uno controls
+        run: dotnet build src/DataSpace.Controls/DataSpace.Controls.csproj -c Release -f net10.0-desktop

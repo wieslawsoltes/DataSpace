@@ -1,0 +1,96 @@
+using SkiaSharp;
+using SkiaSharp.Views.Windows;
+using Windows.UI;
+
+namespace DataSpace.Controls;
+
+public static class OfficeVisuals
+{
+    public static SolidColorBrush Brush(string color)
+    {
+        var parsed = SKColor.Parse(color); return new(Color.FromArgb(parsed.Alpha, parsed.Red, parsed.Green, parsed.Blue));
+    }
+    public static TextBlock Text(string text, double size = 13, string color = "252525", bool bold = false)
+        => new() { Text = text, FontSize = size, Foreground = Brush(color), FontWeight = new Windows.UI.Text.FontWeight { Weight = (ushort)(bold ? 600 : 400) }, VerticalAlignment = VerticalAlignment.Center };
+    public static void Style(Control control, string key)
+    {
+        if (Application.Current.Resources.TryGetValue(key, out var value) && value is Style style) control.Style = style;
+    }
+    public static Button Button(string label, Action action, string? icon = null, string? automationId = null)
+    {
+        var button = new Button { Content = label, MinWidth = 0, MinHeight = 25, Padding = new(7, 3, 7, 3), FontSize = 12 };
+        Style(button, "OfficeButtonStyle");
+        if (icon is not null)
+        {
+            var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
+            panel.Children.Add(new OfficeIcon(icon) { Width = 17, Height = 17 }); panel.Children.Add(Text(label, 12)); button.Content = panel;
+        }
+        AutomationProperties.SetName(button, label); if (automationId is not null) AutomationProperties.SetAutomationId(button, automationId);
+        button.Click += (_, _) => action(); return button;
+    }
+    public static TextBox Input(string value = "", string placeholder = "", double width = double.NaN)
+    {
+        var input = new TextBox { Text = value, PlaceholderText = placeholder, Width = width, MinHeight = 28, FontSize = 13, Padding = new(6, 3, 6, 3) };
+        Style(input, "OfficeTextBoxStyle"); return input;
+    }
+    public static ComboBox Combo(IEnumerable<string> items, string? selected = null, double width = double.NaN)
+    {
+        var box = new ComboBox { Width = width, MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
+        Style(box, "OfficeComboBoxStyle"); foreach (var item in items) box.Items.Add(item);
+        box.SelectedItem = selected; if (box.SelectedIndex < 0 && box.Items.Count > 0) box.SelectedIndex = 0;
+        return box;
+    }
+    public static Border Border(UIElement child, string background = "FFFFFF", string border = "D0D0D0", Thickness? thickness = null, Thickness? padding = null)
+        => new() { Child = child, Background = Brush(background), BorderBrush = Brush(border), BorderThickness = thickness ?? new(1), Padding = padding ?? new(0) };
+    public static Grid Grid(string rows = "*", string columns = "*")
+    {
+        static GridLength Length(string value) => value == "Auto" ? GridLength.Auto : value.EndsWith('*') ? new GridLength(value.Length == 1 ? 1 : double.Parse(value[..^1], FieldValues.Culture), GridUnitType.Star) : new GridLength(double.Parse(value, FieldValues.Culture));
+        var grid = new Grid(); foreach (var row in rows.Split(',')) grid.RowDefinitions.Add(new() { Height = Length(row) });
+        foreach (var column in columns.Split(',')) grid.ColumnDefinitions.Add(new() { Width = Length(column) }); return grid;
+    }
+    public static void Add(Grid grid, UIElement element, int row = 0, int column = 0, int rowSpan = 1, int columnSpan = 1)
+    { Microsoft.UI.Xaml.Controls.Grid.SetRow(element, row); Microsoft.UI.Xaml.Controls.Grid.SetColumn(element, column); Microsoft.UI.Xaml.Controls.Grid.SetRowSpan(element, rowSpan); Microsoft.UI.Xaml.Controls.Grid.SetColumnSpan(element, columnSpan); grid.Children.Add(element); }
+    public static StackPanel Stack(params UIElement[] children)
+    { var panel = new StackPanel { Spacing = 8 }; foreach (var child in children) panel.Children.Add(child); return panel; }
+    public static StackPanel Row(params UIElement[] children)
+    { var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 }; foreach (var child in children) panel.Children.Add(child); return panel; }
+    public static bool ControlDown => (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+    public static bool ShiftDown => (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+}
+
+public sealed class OfficeIcon : SKXamlCanvas
+{
+    private DrawingResources? _drawing;
+    public string Icon { get; }
+    public SKColor Color { get; set; } = SKColor.Parse("546C7C");
+    public OfficeIcon(string icon)
+    {
+        Icon = icon; Width = 24; Height = 24; IsHitTestVisible = false;
+        PaintSurface += (_, e) =>
+        {
+            _drawing ??= new(); e.Surface.Canvas.Clear(SKColors.Transparent);
+            IconRenderer.Draw(e.Surface.Canvas, Icon, new(0, 0, e.Info.Width, e.Info.Height), Color, _drawing);
+        };
+        Unloaded += (_, _) => { _drawing?.Dispose(); _drawing = null; };
+    }
+}
+
+/// <summary>DPI-correct Skia surface that paints in logical Uno device-independent units.</summary>
+public sealed class SkiaSurface : UserControl
+{
+    private readonly SKXamlCanvas _canvas = new();
+    public Action<SKCanvas, float, float>? Painter { get; set; }
+    public SkiaSurface()
+    {
+        Content = _canvas; IsTabStop = false;
+        _canvas.PaintSurface += (_, e) =>
+        {
+            if (ActualWidth <= 0 || ActualHeight <= 0) return;
+            var canvas = e.Surface.Canvas;
+            canvas.Save(); canvas.Scale(e.Info.Width / (float)ActualWidth, e.Info.Height / (float)ActualHeight);
+            Painter?.Invoke(canvas, (float)ActualWidth, (float)ActualHeight); canvas.Restore();
+        };
+        SizeChanged += (_, _) => Invalidate();
+    }
+    public void Invalidate() => _canvas.Invalidate();
+}
