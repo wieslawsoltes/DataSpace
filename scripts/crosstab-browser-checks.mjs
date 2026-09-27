@@ -17,10 +17,14 @@ export async function crosstabBrowserChecks(page, baseURL, screenshots, ready) {
     }
     async function toggle(name, expected) {
         const input = peer('checkbox', name);
-        // Uno's semantic focus also scrolls an offscreen native checkbox into view.
-        // Wait for that focus handoff before dispatching Space, as for native text.
-        // Never retry the key: a missed toggle must fail here, not be hidden later.
-        await input.focus(); await page.waitForTimeout(150);
+        // Walk the actual XAML tab order. DOM focus() on a clipped semantic proxy
+        // is not a native keyboard traversal and can leave focus on the source ComboBox.
+        // Only one Space is dispatched, after the intended control owns focus.
+        for (let i = 0; i < 64; i++) {
+            if (await input.evaluate(element => document.activeElement === element)) break;
+            await page.keyboard.press('Tab'); await page.waitForTimeout(50);
+        }
+        assert.ok(await input.evaluate(element => document.activeElement === element), name + ' must be reachable using Tab.');
         await page.keyboard.press('Space');
         for (let i = 0; i < 50; i++) {
             if (await input.isChecked() === expected) return;
