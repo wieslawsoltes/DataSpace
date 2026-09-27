@@ -1,9 +1,10 @@
-name: Build and test
+name: Build, test and deploy
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 concurrency:
@@ -14,10 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Archive exact tested source
+        run: |
+          mkdir -p artifacts
+          git archive --format=zip --prefix=DataSpace/ HEAD -o artifacts/DataSpace-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-snapshot
+          path: artifacts/DataSpace-source.zip
+          if-no-files-found: error
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - name: Test database, SQL and storage
+      - name: Test database, query and storage libraries
         run: dotnet test tests/DataSpace.Tests/DataSpace.Tests.csproj -c Release --logger 'trx;LogFileName=tests.trx'
       - name: Compile reusable renderers
         run: dotnet build src/DataSpace.Rendering/DataSpace.Rendering.csproj -c Release
@@ -26,8 +36,9 @@ jobs:
         with:
           name: test-results
           path: '**/TestResults/*.trx'
-  uno:
+  application:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -35,5 +46,97 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Install WebAssembly toolchain
         run: dotnet workload install wasm-tools --skip-manifest-update
-      - name: Compile reusable Uno controls
-        run: dotnet build src/DataSpace.Controls/DataSpace.Controls.csproj -c Release -f net10.0-desktop
+      - name: Compile desktop application
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/logs
+          dotnet build src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-desktop 2>&1 | tee artifacts/logs/desktop.log
+      - name: Publish browser application
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-browserwasm -o artifacts/publish -p:WasmShellWebAppBasePath=./ 2>&1 | tee artifacts/logs/browser-publish.log
+      - name: Stage static site
+        id: stage
+        run: python3 scripts/stage-site.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser test tools
+        working-directory: scripts
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Test browser persistence and launch the real Uno app
+        env:
+          DATASPACE_SCREENSHOTS: ${{ github.workspace }}/artifacts/qa
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/server/DataSpace
+          cp -a artifacts/site/. artifacts/server/DataSpace/
+          printf '<!doctype html><title>DataSpace storage test</title>' > artifacts/server/DataSpace/storage-test.html
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory artifacts/server > artifacts/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for retry in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/DataSpace/storage-test.html > /dev/null && break || sleep 1; done
+          node scripts/browser-smoke.mjs 2>&1 | tee artifacts/logs/browser-tests.log
+          mkdir -p artifacts/site/qa
+          cp artifacts/qa/workspace.png artifacts/site/qa/workspace.png
+      - name: Verify all reusable libraries can be packaged
+        id: packages
+        if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in Core Query Storage Rendering Controls; do
+            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -v:normal -o artifacts/packages 2>&1 | tee "artifacts/logs/pack-$project.log"
+          done
+          test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-diagnostics
+          path: |
+            artifacts/qa
+            artifacts/logs
+            artifacts/server.log
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
+        with:
+          name: reusable-libraries
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-app
+          path: artifacts/site
+          include-hidden-files: true
+          if-no-files-found: error
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [engine, application]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-app
+          path: site
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy browser application
+        id: deployment
+        uses: actions/deploy-pages@v4

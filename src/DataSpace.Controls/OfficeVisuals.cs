@@ -1,5 +1,6 @@
 using SkiaSharp;
 using SkiaSharp.Views.Windows;
+using Uno.WinUI.Graphics2DSK;
 using Windows.UI;
 
 namespace DataSpace.Controls;
@@ -37,8 +38,7 @@ public static class OfficeVisuals
     {
         var box = new ComboBox { Width = width, MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         Style(box, "OfficeComboBoxStyle"); foreach (var item in items) box.Items.Add(item);
-        box.SelectedItem = selected; if (box.SelectedIndex < 0 && box.Items.Count > 0) box.SelectedIndex = 0;
-        return box;
+        box.SelectedItem = selected; if (box.SelectedIndex < 0 && box.Items.Count > 0) box.SelectedIndex = 0; return box;
     }
     public static Border Border(UIElement child, string background = "FFFFFF", string border = "D0D0D0", Thickness? thickness = null, Thickness? padding = null)
         => new() { Child = child, Background = Brush(background), BorderBrush = Brush(border), BorderThickness = thickness ?? new(1), Padding = padding ?? new(0) };
@@ -58,39 +58,71 @@ public static class OfficeVisuals
     public static bool ShiftDown => (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
 }
 
-public sealed class OfficeIcon : SKXamlCanvas
+public sealed class OfficeIcon : UserControl
 {
+    private readonly SkiaSurface _surface = new();
     private DrawingResources? _drawing;
+    private SKColor _color = SKColor.Parse("546C7C");
     public string Icon { get; }
-    public SKColor Color { get; set; } = SKColor.Parse("546C7C");
+    public SKColor Color { get => _color; set { _color = value; _surface.Invalidate(); } }
     public OfficeIcon(string icon)
     {
-        Icon = icon; Width = 24; Height = 24; IsHitTestVisible = false;
-        PaintSurface += (_, e) =>
+        Icon = icon; Width = 24; Height = 24; IsHitTestVisible = false; Content = _surface;
+        _surface.Painter = (canvas, width, height) =>
         {
-            _drawing ??= new(); e.Surface.Canvas.Clear(SKColors.Transparent);
-            IconRenderer.Draw(e.Surface.Canvas, Icon, new(0, 0, e.Info.Width, e.Info.Height), Color, _drawing);
+            _drawing ??= new(); IconRenderer.Draw(canvas, Icon, new(0, 0, width, height), Color, _drawing);
         };
         Unloaded += (_, _) => { _drawing?.Dispose(); _drawing = null; };
+        Loaded += (_, _) => _surface.Invalidate();
     }
 }
 
-/// <summary>DPI-correct Skia surface that paints in logical Uno device-independent units.</summary>
+/// <summary>Logical-unit Skia drawing on Uno's shared renderer, with a DPI-correct fallback for other backends.</summary>
 public sealed class SkiaSurface : UserControl
 {
-    private readonly SKXamlCanvas _canvas = new();
-    public Action<SKCanvas, float, float>? Painter { get; set; }
+    private readonly DirectCanvas? _direct;
+    private readonly SKXamlCanvas? _fallback;
+    private Action<SKCanvas, float, float>? _painter;
+    public bool UsesSharedCanvas => _direct is not null;
+    public Action<SKCanvas, float, float>? Painter { get => _painter; set { _painter = value; Invalidate(); } }
     public SkiaSurface()
     {
-        Content = _canvas; IsTabStop = false;
-        _canvas.PaintSurface += (_, e) =>
+        IsTabStop = false;
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        VerticalContentAlignment = VerticalAlignment.Stretch;
+        // Drawing children do not participate in pointer hit testing. A non-null
+        // transparent brush gives their full logical bounds a hit target whose
+        // pointer/gesture events bubble to this reusable surface.
+        var inputRoot = new Grid { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0)) };
+        Content = inputRoot;
+        if (SKCanvasElement.IsSupportedOnCurrentPlatform())
         {
-            if (ActualWidth <= 0 || ActualHeight <= 0) return;
-            var canvas = e.Surface.Canvas;
-            canvas.Save(); canvas.Scale(e.Info.Width / (float)ActualWidth, e.Info.Height / (float)ActualHeight);
-            Painter?.Invoke(canvas, (float)ActualWidth, (float)ActualHeight); canvas.Restore();
-        };
-        SizeChanged += (_, _) => Invalidate();
+            _direct = new DirectCanvas(this) { IsHitTestVisible = false };
+            inputRoot.Children.Add(_direct);
+        }
+        else
+        {
+            _fallback = new SKXamlCanvas { IsHitTestVisible = false };
+            inputRoot.Children.Add(_fallback);
+            _fallback.PaintSurface += (_, e) =>
+            {
+                if (ActualWidth <= 0 || ActualHeight <= 0) return;
+                var canvas = e.Surface.Canvas; canvas.Clear(SKColors.Transparent);
+                canvas.Save();
+                try { canvas.Scale(e.Info.Width / (float)ActualWidth, e.Info.Height / (float)ActualHeight); _painter?.Invoke(canvas, (float)ActualWidth, (float)ActualHeight); }
+                finally { canvas.Restore(); }
+            };
+        }
+        SizeChanged += (_, _) => Invalidate(); Loaded += (_, _) => Invalidate();
     }
-    public void Invalidate() => _canvas.Invalidate();
+    public void Invalidate() { _direct?.Invalidate(); _fallback?.Invalidate(); }
+    private sealed class DirectCanvas(SkiaSurface owner) : SKCanvasElement
+    {
+        protected override void RenderOverride(SKCanvas canvas, Size area)
+        {
+            canvas.Save();
+            try { canvas.ClipRect(new SKRect(0, 0, (float)area.Width, (float)area.Height)); owner._painter?.Invoke(canvas, (float)area.Width, (float)area.Height); }
+            finally { canvas.Restore(); }
+        }
+    }
 }

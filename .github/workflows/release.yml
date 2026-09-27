@@ -1,0 +1,73 @@
+name: Release packages and application
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+  package:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Validate release tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] || { echo 'Use vMAJOR.MINOR.PATCH[-prerelease]'; exit 1; }
+          echo "value=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Install WebAssembly toolchain
+        run: dotnet workload install wasm-tools --skip-manifest-update
+      - name: Package the five reusable libraries
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in Core Query Storage Rendering Controls; do
+            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release \
+              -p:Version="$RELEASE_VERSION" -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg \
+              -o artifacts/release
+          done
+          test "$(find artifacts/release -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-app
+          path: artifacts/browser
+      - name: Archive verified browser distribution and source
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd artifacts/browser && zip -qr "../release/DataSpace-browser-$RELEASE_VERSION.zip" .)
+          git archive --format=zip --prefix=DataSpace/ HEAD > "artifacts/release/DataSpace-source-$RELEASE_VERSION.zip"
+          (cd artifacts/release && sha256sum *.nupkg *.snupkg *.zip > SHA256SUMS.txt)
+      - name: Publish GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=()
+          [[ "$RELEASE_TAG" != *-* ]] || flags+=(--prerelease)
+          gh release create "$RELEASE_TAG" artifacts/release/* --verify-tag \
+            --title "DataSpace $RELEASE_TAG" --generate-notes "${flags[@]}"

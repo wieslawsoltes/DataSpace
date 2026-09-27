@@ -1,8 +1,10 @@
 <Project Sdk="Uno.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net10.0-browserwasm;net10.0-desktop</TargetFrameworks>
-    <UnoSingleProject>true</UnoSingleProject>
+    <!-- Skia controls share a portable asset; browser/desktop TFMs belong to the
+         consuming application, not to Uno's control-library package layout. -->
+    <TargetFrameworks>net10.0</TargetFrameworks>
     <OutputType>Library</OutputType>
+    <IsPackable>true</IsPackable>
     <GenerateLibraryLayout>true</GenerateLibraryLayout>
     <UnoFeatures>SkiaRenderer;</UnoFeatures>
     <Description>Reusable Office-style Uno ribbon, navigation, datasheet and database designer controls.</Description>

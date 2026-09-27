@@ -16,14 +16,11 @@ public sealed class DatasheetControl : UserControl, IDisposable
     private readonly TextBox _editor = OfficeVisuals.Input();
     private IReadOnlyList<FieldDefinition> _fields = [];
     private IReadOnlyList<Record> _records = [];
-    private bool _editing;
-    private bool _committing;
+    private bool _editing, _committing, _selecting, _selectionCaptured;
     private int _resizeColumn = -1;
-    private double _resizeStart;
-    private double _originalWidth;
-    private bool _selecting;
-    private string? _editingRecord;
-    private string? _editingField;
+    private double _resizeStart, _originalWidth;
+    private Point _selectionOrigin;
+    private string? _editingRecord, _editingField;
     public DatasheetViewState ViewState { get; } = new();
     public IReadOnlyList<FieldDefinition> Fields => _fields;
     public IReadOnlyList<Record> Records => _records;
@@ -61,8 +58,12 @@ public sealed class DatasheetControl : UserControl, IDisposable
         Content = root;
         _viewport.SizeChanged += (_, _) => UpdateScrollbars();
         _surface.PointerPressed += OnPressed; _surface.PointerMoved += OnMoved; _surface.PointerReleased += OnReleased;
-        _surface.PointerCaptureLost += (_, _) => { _selecting = false; _resizeColumn = -1; };
-        _surface.DoubleTapped += (_, _) => BeginEdit();
+        _surface.PointerCaptureLost += (_, _) => { _selecting = false; _selectionCaptured = false; _resizeColumn = -1; };
+        _surface.DoubleTapped += (_, e) =>
+        {
+            // Finish the second pointer dispatch before moving native text focus.
+            e.Handled = true; DispatcherQueue.TryEnqueue(() => { if (IsLoaded) BeginEdit(); });
+        };
         _surface.PointerWheelChanged += (_, e) =>
         {
             if (!FinishEdit(false)) return;
@@ -78,7 +79,7 @@ public sealed class DatasheetControl : UserControl, IDisposable
         menu.Items.Add(new MenuFlyoutSeparator());
         Item("Sort A to Z", () => { if (_fields.Count > 0) SortRequested?.Invoke(_fields[ViewState.SelectedColumn].Name, false); });
         Item("Sort Z to A", () => { if (_fields.Count > 0) SortRequested?.Invoke(_fields[ViewState.SelectedColumn].Name, true); });
-        Item("Delete record", () => DeleteRecordsRequested?.Invoke(SelectedRecordIds())); ContextFlyout = menu;
+        Item("Delete record", () => { if (!ViewState.ReadOnly) DeleteRecordsRequested?.Invoke(SelectedRecordIds()); }); ContextFlyout = menu;
     }
     public void SetData(IReadOnlyList<FieldDefinition> fields, IReadOnlyList<Record> records, bool readOnly = false)
     {
@@ -114,39 +115,48 @@ public sealed class DatasheetControl : UserControl, IDisposable
         if (hit.Kind == GridHitKind.ColumnResize)
         { _resizeColumn = hit.Column; _resizeStart = point.Position.X; _originalWidth = _fields[hit.Column].Width; _surface.CapturePointer(e.Pointer); }
         else if (hit.Kind == GridHitKind.ColumnHeader) SortRequested?.Invoke(_fields[hit.Column].Name, Names.Equal(ViewState.SortField, _fields[hit.Column].Name) && !ViewState.SortDescending);
-        else if (hit.Kind == GridHitKind.NewRecord) NewRecordRequested?.Invoke();
+        else if (hit.Kind == GridHitKind.NewRecord) { if (!ViewState.ReadOnly) NewRecordRequested?.Invoke(); }
         else if (hit.Kind == GridHitKind.Corner) SelectAll();
         else if (hit.Kind is GridHitKind.Cell or GridHitKind.RowHeader)
         {
             SelectCell(hit.Row, hit.Column < 0 ? 0 : hit.Column, OfficeVisuals.ShiftDown);
             if (hit.Kind == GridHitKind.RowHeader) { ViewState.AnchorColumn = 0; ViewState.SelectedColumn = Math.Max(0, _fields.Count - 1); _surface.Invalidate(); }
-            _selecting = true; _surface.CapturePointer(e.Pointer);
+            // Capturing/releasing every click terminates Uno's pending double-tap.
+            // Capture only when pointer motion crosses the drag threshold.
+            _selecting = true; _selectionCaptured = false; _selectionOrigin = point.Position;
         }
         e.Handled = true;
     }
     private void OnMoved(object sender, PointerRoutedEventArgs e)
     {
-        var position = e.GetCurrentPoint(_surface).Position;
+        var point = e.GetCurrentPoint(_surface); var position = point.Position;
         if (_resizeColumn >= 0)
         {
-            // Preview is local to the control; the host persists the width on pointer release.
             _fields[_resizeColumn].Width = Math.Clamp(_originalWidth + (position.X - _resizeStart) / ViewState.Zoom, 40, 2000);
             UpdateScrollbars(); _surface.Invalidate(); e.Handled = true;
         }
         else if (_selecting)
         {
+            if (!point.Properties.IsLeftButtonPressed) { _selecting = false; return; }
+            if (!_selectionCaptured)
+            {
+                if (Math.Abs(position.X - _selectionOrigin.X) < 4 && Math.Abs(position.Y - _selectionOrigin.Y) < 4) return;
+                _selectionCaptured = _surface.CapturePointer(e.Pointer);
+            }
             var hit = _renderer.HitTest(_fields, _records.Count, ViewState, (float)position.X, (float)position.Y);
             if (hit.Kind == GridHitKind.Cell) SelectCell(hit.Row, hit.Column, true);
         }
     }
     private void OnReleased(object sender, PointerRoutedEventArgs e)
     {
+        var captured = _selectionCaptured || _resizeColumn >= 0;
         if (_resizeColumn >= 0)
         {
             var field = _fields[_resizeColumn]; var width = field.Width;
             field.Width = _originalWidth; _resizeColumn = -1; ColumnWidthChanged?.Invoke(field.Name, width);
         }
-        _selecting = false; _surface.ReleasePointerCapture(e.Pointer);
+        _selecting = false; _selectionCaptured = false;
+        if (captured) _surface.ReleasePointerCapture(e.Pointer);
     }
     public void BeginEdit(string? initialText = null)
     {
@@ -242,7 +252,7 @@ public sealed class DatasheetControl : UserControl, IDisposable
             case VirtualKey.PageUp: Move(-(int)(_viewport.ActualHeight / (27 * ViewState.Zoom)), 0, extend); break;
             case VirtualKey.PageDown: Move((int)(_viewport.ActualHeight / (27 * ViewState.Zoom)), 0, extend); break;
             case VirtualKey.F2: case VirtualKey.Enter: BeginEdit(); break;
-            case VirtualKey.Insert: NewRecordRequested?.Invoke(); break;
+            case VirtualKey.Insert: if (!ViewState.ReadOnly) NewRecordRequested?.Invoke(); break;
             case VirtualKey.Delete: if (!ViewState.ReadOnly) DeleteRecordsRequested?.Invoke(SelectedRecordIds()); break;
             default: return;
         }
@@ -257,8 +267,7 @@ public sealed class DatasheetControl : UserControl, IDisposable
         _vertical.Maximum = Math.Max(0, _renderer.ContentHeight(_records.Count, ViewState) - _renderer.Theme.ColumnHeaderHeight - height);
         _vertical.ViewportSize = height; _vertical.SmallChange = 27; _vertical.LargeChange = Math.Max(27, height);
         _horizontal.Value = Math.Clamp(_horizontal.Value, 0, _horizontal.Maximum); _vertical.Value = Math.Clamp(_vertical.Value, 0, _vertical.Maximum);
-        ViewState.OffsetX = (float)_horizontal.Value; ViewState.OffsetY = (float)_vertical.Value;
-        _surface.Invalidate();
+        ViewState.OffsetX = (float)_horizontal.Value; ViewState.OffsetY = (float)_vertical.Value; _surface.Invalidate();
     }
     private void EnsureVisible()
     {
