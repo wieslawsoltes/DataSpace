@@ -18,15 +18,17 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
     private readonly Grid _sqlView;
     private QueryDesignerControl? _designer;
     private string _baselineSql, _baselineParameters;
-    private string? _state, _baselineState;
+    private string? _state, _baselineState, _resultSql, _resultParameters;
+    private QueryResult? _lastResult;
     private Dictionary<string, string?> _savedParameters;
     private QueryEditorView _view = QueryEditorView.Sql;
-    private bool _running;
-    private bool _disposed;
+    private bool _running, _disposed;
     public Func<string, Task<bool>>? ConfirmActionAsync { get; set; }
     public event Action<string>? Error;
     public bool HasPendingChanges => _sql.Text != _baselineSql || _parameters.Text != _baselineParameters || _state != _baselineState || _designer?.HasPendingChanges == true;
-    public QueryResult? LastResult { get; private set; }
+    // Uno may deliver initial TextChanged after Loaded. Compare actual content,
+    // not notification timing, so a delayed no-op event never discards a valid result.
+    public QueryResult? LastResult => _sql.Text == _resultSql && _parameters.Text == _resultParameters && _designer?.HasPendingChanges != true ? _lastResult : null;
     public QueryEditorView View => _view;
     public QueryEditorControl(DatabaseWorkspace workspace, string name, bool design = false)
     {
@@ -38,9 +40,7 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
         _sql = OfficeVisuals.Input(query.Sql); _sql.AcceptsReturn = true; _sql.TextWrapping = TextWrapping.Wrap;
         _sql.FontFamily = new FontFamily("Consolas, monospace"); _sql.FontSize = 14; _sql.Margin = new(8);
         AutomationProperties.SetAutomationId(_sql, "SqlEditor"); AutomationProperties.SetName(_sql, "SQL statement");
-        _sql.TextChanged += (_, _) => LastResult = null;
         _parameters = OfficeVisuals.Input(_baselineParameters, "Parameter=value, one per line"); _parameters.AcceptsReturn = true; _parameters.Margin = new(8); _parameters.TextWrapping = TextWrapping.Wrap;
-        _parameters.TextChanged += (_, _) => LastResult = null;
         AutomationProperties.SetName(_parameters, "Query parameters");
         var root = OfficeVisuals.Grid("Auto,*,26");
         var toolbar = OfficeVisuals.Row(
@@ -72,8 +72,8 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
         SynchronizeDesign();
         if (view == QueryEditorView.Design)
         {
-            var model = QueryDesign.Restore(_sql.Text, _state); // Parse first; failure leaves the SQL buffer untouched.
-            var next = new QueryDesignerControl(_workspace.Document, model); next.Changed += () => LastResult = null;
+            var model = QueryDesign.Restore(_sql.Text, _state);
+            var next = new QueryDesignerControl(_workspace.Document, model);
             _designer?.Dispose(); _designer = next; _host.Content = next;
         }
         else if (view == QueryEditorView.Sql) _host.Content = _sqlView;
@@ -87,7 +87,6 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
     private void SynchronizeDesign()
     {
         if (_view != QueryEditorView.Design || _designer?.HasPendingChanges != true) return;
-        // Neither buffer nor persisted state is replaced until the full design validates.
         var sql = _designer.ToSql(); var state = _designer.Design.Serialize();
         _sql.Text = sql; _state = state; _designer.MarkCommitted();
     }
@@ -104,8 +103,7 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
     }
     public void Commit()
     {
-        SynchronizeDesign();
-        if (!HasPendingChanges) return;
+        SynchronizeDesign(); if (!HasPendingChanges) return;
         _engine.IsReadOnly(_sql.Text); var parameters = ReadParameters();
         var current = _workspace.Document.Queries.First(q => Names.Equal(q.Name, _name));
         if (current.Sql != _baselineSql || current.DesignerState != _baselineState || current.Parameters.Count != _savedParameters.Count ||
@@ -126,11 +124,11 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
             if (!_engine.IsReadOnly(sql) && (ConfirmActionAsync is null || !await ConfirmActionAsync("Run this action query? It may insert, update, delete records or change the schema. The whole action is undoable."))) return;
             if (_disposed) return;
             var parameters = ReadParameters().ToDictionary(p => p.Key, p => (object?)p.Value, StringComparer.OrdinalIgnoreCase);
-            LastResult = null;
+            _lastResult = null;
             var result = _engine.Execute(_workspace, sql, parameters);
-            LastResult = result; _results.SetData(result.Fields, result.Records, true);
-            _host.Content = _results; _view = QueryEditorView.Datasheet;
-            _status.Text = result.IsAction ? $"{result.AffectedRecords:N0} record(s) affected" : $"{result.Records.Count:N0} records · {result.Duration.TotalMilliseconds:N1} ms";
+            _lastResult = result; _resultSql = sql; _resultParameters = _parameters.Text;
+            _results.SetData(result.Fields, result.Records, true); _host.Content = _results; _view = QueryEditorView.Datasheet;
+            _status.Text = result.IsAction ? $"{result.AffectedRecords:N0} record(s) affected" : $"{result.Records.Count:N0} records · {result.Duration.TotalMilliseconds:N1} ms · {result.Statistics.HashJoins} hash join(s) · {result.Statistics.JoinComparisons:N0} comparisons";
         }
         catch (Exception error) { ShowError(error.Message); }
         finally { _running = false; }

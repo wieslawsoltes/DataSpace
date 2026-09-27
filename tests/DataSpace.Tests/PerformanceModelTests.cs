@@ -72,10 +72,11 @@ public sealed class PerformanceModelTests
     public void FastEditsRetainReferentialChecksAndCascadeFallback()
     {
         var workspace = new DatabaseWorkspace(SampleDatabase.Create()); var before = workspace.Document;
-        var order = before.Table("Orders").Records[0];
+        var order = before.Table("Orders").Records[0]; var parent = before.Table("Customers").Records[0];
         Assert.Throws<DataSpaceException>(() => workspace.UpdateRecords("orphan", "Orders", [new(order.Id, "Customer ID", "9999")]));
+        Assert.Throws<DataSpaceException>(() => workspace.UpdateRecords("restricted", "Customers", [new(parent.Id, "ID", "200")]));
         Assert.Same(before, workspace.Document);
-        var parent = before.Table("Customers").Records[0];
+        workspace.Edit("enable cascade", document => document.Relationships.First(r => r.Name == "Customers_Orders").CascadeUpdate = true);
         workspace.UpdateRecords("cascade", "Customers", [new(parent.Id, "ID", "200")]);
         Assert.Equal("1", parent["ID"]); Assert.Contains(workspace.Document.Table("Orders").Records, r => r["Customer ID"] == "200");
         SchemaValidator.Validate(DocumentSnapshot.Copy(workspace.Document));
