@@ -40,6 +40,7 @@ jobs:
       - name: Compile desktop application
         run: dotnet build src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-desktop
       - name: Publish browser application
+        id: publish
         run: dotnet publish src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-browserwasm -o artifacts/publish -p:WasmShellWebAppBasePath=./
       - name: Stage static site
         run: python3 scripts/stage-site.py
@@ -73,6 +74,8 @@ jobs:
             artifacts/qa
             artifacts/server.log
       - name: Verify all reusable libraries can be packaged
+        id: packages
+        if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
         run: |
           set -euo pipefail
           for project in Core Query Storage Rendering Controls; do
@@ -80,6 +83,7 @@ jobs:
           done
           test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
         with:
           name: reusable-libraries
           path: artifacts/packages/*.nupkg
