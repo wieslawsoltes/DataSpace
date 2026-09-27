@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using DataSpace.Core;
 
 namespace DataSpace.Query;
@@ -47,7 +48,7 @@ public sealed class QueryDesign
     public static string Field(string alias, string field) => Names.Quote(alias) + "." + Names.Quote(field);
     public string ToSql() => QueryDesignSql.Generate(this);
     public static QueryDesign FromSql(string sql) => QueryDesignSql.Parse(sql);
-    public string Serialize() { _ = ToSql(); return JsonSerializer.Serialize(this); }
+    public string Serialize() { _ = ToSql(); return JsonSerializer.Serialize(this, QueryDesignJsonContext.Default.QueryDesign); }
     public static QueryDesign Restore(string sql, string? state)
     {
         // Stale or malformed view state must never replace SQL supplied by a user.
@@ -55,7 +56,7 @@ public sealed class QueryDesign
         {
             try
             {
-                var design = JsonSerializer.Deserialize<QueryDesign>(state);
+                var design = JsonSerializer.Deserialize(state, QueryDesignJsonContext.Default.QueryDesign);
                 if (design is not null && design.ToSql() == sql) return design;
             }
             catch (Exception error) when (error is JsonException or DataSpaceException or ArgumentException or NullReferenceException) { }
@@ -100,7 +101,7 @@ public static class QueryDesignSql
             var column = new QueryDesignColumn { Alias = projection.Alias ?? "" };
             column.Expression = projection.Wildcard is { } wildcard ? (wildcard.Length == 0 ? "*" : Names.Quote(wildcard) + ".*") : SqlText.Format(projection.Expression);
             if (projection.Wildcard is null && projection.Expression is FunctionExpr function && function.Arguments.Count == 1 &&
-                Enum.TryParse<QueryTotal>(function.Name, true, out var total) && total is >= QueryTotal.Sum and <= QueryTotal.Last)
+                Enum.TryParse<QueryTotal>(function.Name, true, out var total) && IsAggregateTotal(total))
             { column.Total = total; column.Expression = SqlText.Format(function.Arguments[0]); }
             else if (plan.Groups.Any(g => SqlText.Same(g, projection.Expression))) column.Total = QueryTotal.GroupBy;
             design.Columns.Add(column);
@@ -130,7 +131,7 @@ public static class QueryDesignSql
                 throw new DataSpaceException("Invalid query source position or join type.");
         }
         var expressions = design.Columns.Select(Expression).ToArray();
-        var grouped = (!string.IsNullOrWhiteSpace(design.Having) && SqlText.Parse(design.Having).Aggregate) || design.Columns.Any(c => c.Total is >= QueryTotal.GroupBy and <= QueryTotal.Last) || expressions.Any(e => e != "*" && !e.EndsWith(".*", StringComparison.Ordinal) && SqlText.Parse(e).Aggregate);
+        var grouped = (!string.IsNullOrWhiteSpace(design.Having) && SqlText.Parse(design.Having).Aggregate) || design.Columns.Any(c => c.Total == QueryTotal.GroupBy || IsAggregateTotal(c.Total)) || expressions.Any(e => e != "*" && !e.EndsWith(".*", StringComparison.Ordinal) && SqlText.Parse(e).Aggregate);
         var groups = design.Columns.Where(c => c.Total == QueryTotal.GroupBy).Select(c => SqlText.Parse(c.Expression)).ToList();
         var visible = design.Columns.Select((c, i) => (c, i)).Where(p => p.c.Show && p.c.Total != QueryTotal.Where).ToArray();
         if (visible.Length == 0) throw new DataSpaceException("Select Show for at least one output column.");
@@ -189,12 +190,13 @@ public static class QueryDesignSql
         builder.Append(';');
         var sql = builder.ToString(); _ = new SqlParser(sql).Parse(); return sql;
     }
+    private static bool IsAggregateTotal(QueryTotal total) => total is QueryTotal.Sum or QueryTotal.Avg or QueryTotal.Min or QueryTotal.Max or QueryTotal.Count or QueryTotal.First or QueryTotal.Last;
     private static string Expression(QueryDesignColumn column)
     {
         if (!Enum.IsDefined(column.Total) || !Enum.IsDefined(column.Sort) || column.Criteria is null || column.Criteria.Count > 32 || column.SortPriority < 0)
             throw new DataSpaceException("Invalid column options; at most 32 criteria rows are supported.");
         var expression = column.Expression.Trim();
-        if (column.Total is >= QueryTotal.Sum and <= QueryTotal.Last) return SqlText.Format(SqlText.Parse(column.Total.ToString().ToUpperInvariant() + "(" + expression + ")"));
+        if (IsAggregateTotal(column.Total)) return SqlText.Format(SqlText.Parse(column.Total.ToString().ToUpperInvariant() + "(" + expression + ")"));
         if (expression == "*" || expression.EndsWith(".*", StringComparison.Ordinal))
         {
             if (column.Total != QueryTotal.None || column.Sort != QuerySort.None || column.Criteria.Any(s => !string.IsNullOrWhiteSpace(s)) || column.Alias.Length != 0)
@@ -214,3 +216,7 @@ public static class QueryDesignSql
         if (parts.Count > 0) builder.Append('\n').Append(name).Append(' ').AppendJoin(" AND ", parts.Select(p => "(" + p + ")"));
     }
 }
+
+[JsonSourceGenerationOptions(UseStringEnumConverter = true)]
+[JsonSerializable(typeof(QueryDesign))]
+internal partial class QueryDesignJsonContext : JsonSerializerContext;

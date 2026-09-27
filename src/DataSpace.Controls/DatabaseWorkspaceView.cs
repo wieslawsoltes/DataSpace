@@ -116,7 +116,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
         {
             DatabaseObjectKind.Table when design => new TableDesignerControl(Workspace, item.Name),
             DatabaseObjectKind.Table => CreateDatasheet(item.Name),
-            DatabaseObjectKind.Query => new QueryEditorControl(Workspace, item.Name),
+            DatabaseObjectKind.Query => new QueryEditorControl(Workspace, item.Name, design),
             DatabaseObjectKind.Form => new FormEditorControl(Workspace, item.Name, design),
             DatabaseObjectKind.Report => new ReportPreviewControl(Workspace, item.Name, design),
             DatabaseObjectKind.Relationships => new RelationshipDesignerControl(Workspace),

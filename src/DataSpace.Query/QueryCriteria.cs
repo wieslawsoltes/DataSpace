@@ -47,7 +47,8 @@ public static class QueryCriteria
         if (tokens.All(t => t.Kind == TokenKind.Word) && !new[] { "TRUE", "FALSE", "NULL" }.Contains(text.ToUpperInvariant()))
             return field + " = '" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
         var value = SqlText.Parse(text);
-        return value is BinaryExpr or NullExpr or InExpr ? text : field + " = (" + text + ")";
+        return value is BinaryExpr { Op: "=" or "!=" or "<>" or "<" or ">" or "<=" or ">=" or "AND" or "OR" or "LIKE" } or NullExpr or InExpr
+            ? text : field + " = (" + text + ")";
     }
     private static bool Enclosed(List<Token> tokens)
     {

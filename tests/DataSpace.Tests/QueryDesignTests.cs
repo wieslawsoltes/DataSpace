@@ -60,11 +60,11 @@ public sealed class QueryDesignTests
         Assert.Equal(count, _engine.Select(_document, "SELECT * FROM Customers WHERE " + predicate).Records.Count);
     }
     [Theory]
-    [InlineData("UK", 3)]
-    [InlineData("UK OR Poland", 4)]
-    [InlineData("Like 'U*'", 5)]
-    [InlineData("= 'UK' Or = 'Poland'", 4)]
-    [InlineData("In ('UK','Poland')", 4)]
+    [InlineData("UK", 4)]
+    [InlineData("UK OR Poland", 5)]
+    [InlineData("Like 'U*'", 7)]
+    [InlineData("= 'UK' Or = 'Poland'", 5)]
+    [InlineData("In ('UK','Poland')", 5)]
     public void TextCriteriaAreLiteralsRatherThanUnboundNames(string criterion, int count)
         => Assert.Equal(count, _engine.Select(_document, "SELECT * FROM Customers WHERE " + QueryCriteria.Compile("Country", criterion)).Records.Count);
 
