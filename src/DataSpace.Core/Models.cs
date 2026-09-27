@@ -82,6 +82,8 @@ public sealed class RelationshipDefinition
 
 public sealed class QueryDefinition
 {
+    /// <summary>Optional detached designer state, used only when it generates the authoritative Sql verbatim.</summary>
+    public string? DesignerState { get; set; }
     public string Name { get; set; } = "Query1";
     public string Sql { get; set; } = "SELECT * FROM [Customers];";
     public Dictionary<string, string?> Parameters { get; set; } = new(StringComparer.OrdinalIgnoreCase);

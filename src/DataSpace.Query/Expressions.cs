@@ -31,7 +31,7 @@ internal abstract record Expr
 {
     public abstract object? Eval(EvaluationContext context);
     public virtual bool Aggregate => false;
-    public virtual bool GroupSafe(IReadOnlyList<Expr> groups) => groups.Contains(this);
+    public virtual bool GroupSafe(IReadOnlyList<Expr> groups) => groups.Any(group => SqlText.Same(group, this));
 }
 internal sealed record LiteralExpr(object? Value) : Expr
 {
@@ -47,7 +47,7 @@ internal sealed record StarExpr : Expr { public override object? Eval(Evaluation
 internal sealed record UnaryExpr(string Op, Expr Operand) : Expr
 {
     public override bool Aggregate => Operand.Aggregate;
-    public override bool GroupSafe(IReadOnlyList<Expr> groups) => groups.Contains(this) || Operand.GroupSafe(groups);
+    public override bool GroupSafe(IReadOnlyList<Expr> groups) => groups.Any(group => SqlText.Same(group, this)) || Operand.GroupSafe(groups);
     public override object? Eval(EvaluationContext context)
     {
         var value = Operand.Eval(context);
@@ -58,7 +58,7 @@ internal sealed record UnaryExpr(string Op, Expr Operand) : Expr
 internal sealed record BinaryExpr(string Op, Expr Left, Expr Right) : Expr
 {
     public override bool Aggregate => Left.Aggregate || Right.Aggregate;
-    public override bool GroupSafe(IReadOnlyList<Expr> groups) => groups.Contains(this) || Left.GroupSafe(groups) && Right.GroupSafe(groups);
+    public override bool GroupSafe(IReadOnlyList<Expr> groups) => groups.Any(group => SqlText.Same(group, this)) || Left.GroupSafe(groups) && Right.GroupSafe(groups);
     public override object? Eval(EvaluationContext context)
     {
         var a = Left.Eval(context);
@@ -115,7 +115,7 @@ internal sealed record FunctionExpr(string Name, List<Expr> Arguments) : Expr
 {
     private bool IsAggregate => Name is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX" or "FIRST" or "LAST";
     public override bool Aggregate => IsAggregate || Arguments.Any(a => a.Aggregate);
-    public override bool GroupSafe(IReadOnlyList<Expr> groups) => IsAggregate || groups.Contains(this) || Arguments.All(a => a.GroupSafe(groups));
+    public override bool GroupSafe(IReadOnlyList<Expr> groups) => IsAggregate || groups.Any(group => SqlText.Same(group, this)) || Arguments.All(a => a.GroupSafe(groups));
     public override object? Eval(EvaluationContext context)
     {
         void Arity(int min, int max)
