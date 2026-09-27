@@ -1,0 +1,25 @@
+<Project>
+  <!-- SkiaSharp 4.152.1 passes -std=c++20 while linking its WebGPU bridge. Uno 6.7
+       also passes an uncompiled C GL shim to that link invocation. Include the
+       installed, unmodified shim through a C++ translation unit with C linkage.
+       Only this known file/version combination is adapted; no NuGet cache is edited. -->
+  <Target Name="DataSpaceAdaptUnoNativeShim"
+          BeforeTargets="_UnoAdjustCompatibility"
+          Condition="'$(TargetFramework)' == 'net10.0-browserwasm' and '$(OutputType)' == 'Exe' and '$(SkiaSharpVersion)' == '4.152.1'">
+    <ItemGroup>
+      <_DataSpaceUnoShim Include="@(WasmShellNativeCompile)" Condition="'%(Filename)%(Extension)' == 'uno_gl_shim.c'" />
+    </ItemGroup>
+    <PropertyGroup Condition="'@(_DataSpaceUnoShim)' != ''">
+      <_DataSpaceNativeDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'native-compat'))</_DataSpaceNativeDirectory>
+    </PropertyGroup>
+    <MakeDir Directories="$(_DataSpaceNativeDirectory)" Condition="'@(_DataSpaceUnoShim)' != ''" />
+    <Copy SourceFiles="@(_DataSpaceUnoShim)" DestinationFiles="$(_DataSpaceNativeDirectory)uno_gl_shim.h" SkipUnchangedFiles="true" Condition="'@(_DataSpaceUnoShim)' != ''" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)build/uno-gl-compat.cpp" DestinationFolder="$(_DataSpaceNativeDirectory)" SkipUnchangedFiles="true" Condition="'@(_DataSpaceUnoShim)' != ''" />
+    <ItemGroup Condition="'@(_DataSpaceUnoShim)' != ''">
+      <WasmShellNativeCompile Remove="@(_DataSpaceUnoShim)" />
+      <NativeFileReference Remove="@(_DataSpaceUnoShim)" />
+      <WasmShellNativeCompile Include="$(_DataSpaceNativeDirectory)uno-gl-compat.cpp" />
+      <FileWrites Include="$(_DataSpaceNativeDirectory)uno_gl_shim.h;$(_DataSpaceNativeDirectory)uno-gl-compat.cpp" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -28,6 +28,7 @@ jobs:
           path: '**/TestResults/*.trx'
   application:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -40,17 +41,36 @@ jobs:
       - name: Publish browser application
         run: dotnet publish src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-browserwasm -o artifacts/publish -p:WasmShellWebAppBasePath=./
       - name: Stage static site
-        shell: bash
+        run: python3 scripts/stage-site.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser test tools
+        working-directory: scripts
         run: |
-          set -euo pipefail
-          index=$(find artifacts/publish src/DataSpace.App/bin/Release/net10.0-browserwasm -name index.html -type f | head -n 1)
-          test -n "$index"
-          mkdir -p artifacts/site
-          cp -a "$(dirname "$index")/." artifacts/site/
-          cp src/DataSpace.App/browser-storage.js artifacts/site/browser-storage.js
-          touch artifacts/site/.nojekyll
-          test -f artifacts/site/index.html
-          find artifacts/site -name '*.wasm' -print -quit | grep .
+          npm install --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Test browser persistence and launch the real Uno app
+        env:
+          DATASPACE_SCREENSHOTS: ${{ github.workspace }}/artifacts/qa
+        run: |
+          mkdir -p artifacts/server/DataSpace
+          cp -a artifacts/site/. artifacts/server/DataSpace/
+          printf '<!doctype html><title>DataSpace storage test</title>' > artifacts/server/DataSpace/storage-test.html
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory artifacts/server > artifacts/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for retry in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/DataSpace/storage-test.html > /dev/null && break || sleep 1; done
+          node scripts/browser-smoke.mjs
+          mkdir -p artifacts/site/qa
+          cp artifacts/qa/workspace.png artifacts/site/qa/workspace.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-diagnostics
+          path: |
+            artifacts/qa
+            artifacts/server.log
       - uses: actions/upload-artifact@v4
         with:
           name: browser-app

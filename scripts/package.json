@@ -1,0 +1,7 @@
+{
+  "name": "dataspace-browser-checks",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node browser-smoke.mjs" },
+  "devDependencies": { "playwright": "1.55.1" }
+}
