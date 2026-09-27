@@ -15,6 +15,19 @@ export async function crosstabBrowserChecks(page, baseURL, screenshots, ready) {
         await page.keyboard.press('Tab'); await page.waitForTimeout(150);
         assert.equal((await input.inputValue()).replace(/\r\n?/g, '\n'), value.replace(/\r\n?/g, '\n'));
     }
+    async function toggle(name, expected) {
+        const input = peer('checkbox', name);
+        // Uno's semantic focus also scrolls an offscreen native checkbox into view.
+        // Wait for that focus handoff before dispatching Space, as for native text.
+        // Never retry the key: a missed toggle must fail here, not be hidden later.
+        await input.focus(); await page.waitForTimeout(150);
+        await page.keyboard.press('Space');
+        for (let i = 0; i < 50; i++) {
+            if (await input.isChecked() === expected) return;
+            await page.waitForTimeout(100);
+        }
+        assert.equal(await input.isChecked(), expected, name + ' must reflect the native keyboard toggle.');
+    }
     async function database() {
         return page.evaluate(async baseURL => {
             const { readWorkspace } = await import(new URL('browser-storage.js', baseURL).href);
@@ -37,10 +50,13 @@ export async function crosstabBrowserChecks(page, baseURL, screenshots, ready) {
         await button('Cancel'); assert.equal((await peer('textbox', 'SQL statement').inputValue()).replace(/\r\n?/g, '\n'), previous.replace(/\r\n?/g, '\n')); checks++;
         await button('Crosstab Builder');
         // The builder starts with Customers. Select Country as the row axis and City as columns.
-        await peer('checkbox', 'Row heading Country').press('Space');
+        await toggle('Row heading Country', true);
+        await toggle('Row heading Country', false);
+        await toggle('Row heading Country', true); checks++;
         await edit('Column heading expression', 'City'); await edit('Value expression', '*');
         await edit('Fixed column headings', "'London', 'Warsaw', 'No matching city'");
-        await peer('checkbox', 'Include row totals').press('Space');
+        await toggle('Include row totals', true);
+        assert.equal(await peer('checkbox', 'Row heading Country').isChecked(), true);
         await page.screenshot({ path: screenshots + '/crosstab-builder.png', fullPage: true });
         await button('Generate SQL');
         assert.ok((await peer('textbox', 'SQL statement').inputValue()).includes('TRANSFORM COUNT(*)')); checks++;
