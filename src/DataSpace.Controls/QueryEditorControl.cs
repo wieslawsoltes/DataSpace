@@ -26,8 +26,7 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
     public Func<string, Task<bool>>? ConfirmActionAsync { get; set; }
     public event Action<string>? Error;
     public bool HasPendingChanges => _sql.Text != _baselineSql || _parameters.Text != _baselineParameters || _state != _baselineState || _designer?.HasPendingChanges == true;
-    // Uno may deliver initial TextChanged after Loaded. Compare actual content,
-    // not notification timing, so a delayed no-op event never discards a valid result.
+    // Compare actual text, not notification timing: a delayed no-op initial event must not discard results.
     public QueryResult? LastResult => _sql.Text == _resultSql && _parameters.Text == _resultParameters && _designer?.HasPendingChanges != true ? _lastResult : null;
     public QueryEditorView View => _view;
     public QueryEditorControl(DatabaseWorkspace workspace, string name, bool design = false)
@@ -37,10 +36,10 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
         _baselineSql = query.Sql; _state = _baselineState = query.DesignerState;
         _savedParameters = new(query.Parameters, StringComparer.OrdinalIgnoreCase);
         _baselineParameters = string.Join("\n", query.Parameters.Select(p => p.Key + "=" + p.Value));
-        _sql = OfficeVisuals.Input(query.Sql); _sql.AcceptsReturn = true; _sql.TextWrapping = TextWrapping.Wrap;
+        _sql = EditorVisuals.Multiline(query.Sql);
         _sql.FontFamily = new FontFamily("Consolas, monospace"); _sql.FontSize = 14; _sql.Margin = new(8);
         AutomationProperties.SetAutomationId(_sql, "SqlEditor"); AutomationProperties.SetName(_sql, "SQL statement");
-        _parameters = OfficeVisuals.Input(_baselineParameters, "Parameter=value, one per line"); _parameters.AcceptsReturn = true; _parameters.Margin = new(8); _parameters.TextWrapping = TextWrapping.Wrap;
+        _parameters = EditorVisuals.Multiline(_baselineParameters, "Parameter=value, one per line"); _parameters.Margin = new(8);
         AutomationProperties.SetName(_parameters, "Query parameters");
         var root = OfficeVisuals.Grid("Auto,*,26");
         var toolbar = OfficeVisuals.Row(

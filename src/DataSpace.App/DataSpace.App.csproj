@@ -6,8 +6,8 @@
     <UnoFeatures>SkiaRenderer;</UnoFeatures>
     <ApplicationTitle>DataSpace</ApplicationTitle>
     <ApplicationId>org.dataspace.app</ApplicationId>
-    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
-    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <WasmShellWebAppBasePath>./</WasmShellWebAppBasePath>

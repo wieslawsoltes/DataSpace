@@ -10,6 +10,12 @@ public interface IDatabaseEditor : IDisposable
 internal static class EditorVisuals
 {
     public static ScrollViewer Scroll(UIElement child) => new() { Content = child, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+    public static TextBox Multiline(string value, string placeholder = "")
+    {
+        var input = OfficeVisuals.Input(placeholder: placeholder);
+        // Set the input mode before assigning text; a single-line TextBox can coerce newlines away.
+        input.AcceptsReturn = true; input.TextWrapping = TextWrapping.Wrap; input.Text = value; return input;
+    }
     public static void Labeled(Panel panel, string label, FrameworkElement input)
     {
         panel.Children.Add(OfficeVisuals.Text(label, 12, "555555")); AutomationProperties.SetName(input, label); panel.Children.Add(input);

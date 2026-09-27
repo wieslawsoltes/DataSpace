@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""Build a package-only copy of the Uno sample; never resolves its controls through project references."""
+"""Compile the sample against exact generated packages, with no library project references."""
 from pathlib import Path
+import json
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
+import zipfile
 
 root = Path(__file__).resolve().parents[1]
 target = root / 'artifacts' / 'package-consumer'
 packages = root / 'artifacts' / 'packages'
+archives = list(packages.glob('DataSpace.Controls.*.nupkg'))
+if len(archives) != 1:
+    raise SystemExit('Expected exactly one generated Controls package.')
+with zipfile.ZipFile(archives[0]) as archive:
+    manifest = ET.fromstring(archive.read(next(name for name in archive.namelist() if name.endswith('.nuspec'))))
+    version = manifest.find('.//{*}metadata/{*}version').text
+if not version:
+    raise SystemExit('Generated package has no version.')
 if target.exists():
     shutil.rmtree(target)
 shutil.copytree(root / 'src' / 'DataSpace.App', target, ignore=shutil.ignore_patterns('bin', 'obj'))
@@ -17,7 +27,8 @@ count = 0
 for group in tree.getroot().findall('ItemGroup'):
     for reference in list(group.findall('ProjectReference')):
         group.remove(reference)
-        ET.SubElement(group, 'PackageReference', {'Include': 'DataSpace.Controls', 'Version': '$(Version)'})
+        # Uno application display versions need not equal reusable-library prerelease versions.
+        ET.SubElement(group, 'PackageReference', {'Include': 'DataSpace.Controls', 'Version': '[' + version + ']'})
         count += 1
 if count != 1 or tree.getroot().findall('.//ProjectReference'):
     raise SystemExit('Expected exactly one app-to-controls reference; refusing an ambiguous consumer test.')
@@ -25,11 +36,9 @@ tree.write(project, encoding='utf-8', xml_declaration=False)
 subprocess.run(['dotnet', 'restore', str(project), '--source', str(packages), '--source', 'https://api.nuget.org/v3/index.json'], cwd=root, check=True)
 for framework in ('net10.0-desktop', 'net10.0-browserwasm'):
     subprocess.run(['dotnet', 'build', str(project), '-c', 'Release', '-f', framework, '--no-restore'], cwd=root, check=True)
-assets = target / 'obj' / 'project.assets.json'
-import json
-libraries = json.loads(assets.read_text())['libraries']
+libraries = json.loads((target / 'obj' / 'project.assets.json').read_text())['libraries']
 required = {'DataSpace.Core', 'DataSpace.Query', 'DataSpace.Storage', 'DataSpace.Rendering', 'DataSpace.Controls'}
-actual = {name.split('/')[0] for name, value in libraries.items() if value.get('type') == 'package'}
+actual = {name.split('/')[0] for name, value in libraries.items() if value.get('type') == 'package' and name.endswith('/' + version)}
 if not required.issubset(actual):
-    raise SystemExit('Consumer did not resolve all five DataSpace libraries as packages.')
-print('PASS: both Uno heads compiled using all five DataSpace NuGet packages; no library ProjectReference remained.')
+    raise SystemExit('Consumer did not resolve all five DataSpace libraries at the generated package version.')
+print(f'PASS: both Uno heads compiled using all five DataSpace {version} NuGet packages; no library ProjectReference remained.')

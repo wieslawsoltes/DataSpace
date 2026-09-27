@@ -125,7 +125,7 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
         var top = OfficeVisuals.Input(_topText, "All records");
         top.TextChanged += (_, _) =>
         {
-            if (!top.IsLoaded || _topText == top.Text) return;
+            if (_topText == top.Text) return;
             _topText = top.Text; _invalidTop = false;
             if (top.Text.Length == 0) Design.Top = null;
             else if (int.TryParse(top.Text, out var value) && value >= 0) Design.Top = value;
@@ -134,8 +134,8 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
         EditorVisuals.Labeled(_properties, "Top Values", top);
         void Text(string label, string value, Action<string> setter)
         {
-            var previous = value; var input = OfficeVisuals.Input(value); input.AcceptsReturn = true; input.TextWrapping = TextWrapping.Wrap; input.MaxHeight = 110;
-            input.TextChanged += (_, _) => { if (!input.IsLoaded || input.Text == previous) return; previous = input.Text; setter(previous); ChangedDesign(); }; EditorVisuals.Labeled(_properties, label, input);
+            var previous = value; var input = EditorVisuals.Multiline(value); input.MaxHeight = 110;
+            input.TextChanged += (_, _) => { if (input.Text == previous) return; previous = input.Text; setter(previous); ChangedDesign(); }; EditorVisuals.Labeled(_properties, label, input);
         }
         Text("WHERE (before grouping)", Design.Where, value => Design.Where = value); Text("HAVING (after grouping)", Design.Having, value => Design.Having = value);
         var help = OfficeVisuals.Text("Imported WHERE/HAVING expressions are preserved here. Grid criteria are additional conditions.", 11, "666666"); help.TextWrapping = TextWrapping.Wrap; _properties.Children.Add(help);
@@ -143,7 +143,7 @@ public sealed class QueryDesignerControl : UserControl, IDisposable
         if (Design.Sources.IndexOf(source) > 0)
         {
             var join = OfficeVisuals.Combo(Enum.GetNames<QueryJoinKind>(), source.Join.ToString());
-            join.SelectionChanged += (_, _) => { if (join.IsLoaded && join.SelectedItem is string value && value != source.Join.ToString()) { source.Join = Enum.Parse<QueryJoinKind>(value); ChangedDesign(); } };
+            join.SelectionChanged += (_, _) => { if (join.SelectedItem is string value && value != source.Join.ToString()) { source.Join = Enum.Parse<QueryJoinKind>(value); ChangedDesign(); } };
             EditorVisuals.Labeled(_properties, "Join Type", join); Text("ON expression", source.Condition, value => source.Condition = value);
         }
         _properties.Children.Add(OfficeVisuals.Button("Remove Source", () =>
@@ -190,19 +190,19 @@ public sealed class QueryDesignGrid : UserControl
             void Text(string value, int row, string label, Action<string> assign)
             {
                 var previous = value; var input = OfficeVisuals.Input(value);
-                input.TextChanged += (_, _) => { if (!input.IsLoaded || input.Text == previous) return; previous = input.Text; assign(previous); Changed?.Invoke(); }; Place(input, row, label);
+                input.TextChanged += (_, _) => { if (input.Text == previous) return; previous = input.Text; assign(previous); Changed?.Invoke(); }; Place(input, row, label);
             }
             var actions = OfficeVisuals.Row(OfficeVisuals.Text("Column " + cellColumn, 11), OfficeVisuals.Button("←", () => Move(column, -1)), OfficeVisuals.Button("→", () => Move(column, 1)), OfficeVisuals.Button("×", () => { _design.Columns.Remove(column); Rebuild(); Changed?.Invoke(); })); Place(actions, 0, "Column actions");
             Text(column.Expression, 1, "Field expression", value => column.Expression = value); Text(column.Alias, 2, "Output alias", value => column.Alias = value);
             var sort = OfficeVisuals.Combo(Enum.GetNames<QuerySort>(), column.Sort.ToString());
-            sort.SelectionChanged += (_, _) => { if (sort.IsLoaded && sort.SelectedItem is string value && value != column.Sort.ToString()) { column.Sort = Enum.Parse<QuerySort>(value); Changed?.Invoke(); } }; Place(sort, 3, "Sort");
+            sort.SelectionChanged += (_, _) => { if (sort.SelectedItem is string value && value != column.Sort.ToString()) { column.Sort = Enum.Parse<QuerySort>(value); Changed?.Invoke(); } }; Place(sort, 3, "Sort");
             var priority = new NumberBox { Value = column.SortPriority, Minimum = 0, Maximum = 256, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
-            priority.ValueChanged += (_, _) => { if (priority.IsLoaded && double.IsFinite(priority.Value) && column.SortPriority != (int)priority.Value) { column.SortPriority = (int)priority.Value; Changed?.Invoke(); } }; Place(priority, 4, "Sort order (zero uses column order)");
+            priority.ValueChanged += (_, _) => { if (double.IsFinite(priority.Value) && column.SortPriority != (int)priority.Value) { column.SortPriority = (int)priority.Value; Changed?.Invoke(); } }; Place(priority, 4, "Sort order (zero uses column order)");
             Place(EditorVisuals.Check("", column.Show, value => { column.Show = value; Changed?.Invoke(); }), 5, "Show"); var first = 6;
             if (_totals)
             {
                 var total = OfficeVisuals.Combo(Enum.GetNames<QueryTotal>(), column.Total.ToString());
-                total.SelectionChanged += (_, _) => { if (total.IsLoaded && total.SelectedItem is string value && value != column.Total.ToString()) { column.Total = Enum.Parse<QueryTotal>(value); Changed?.Invoke(); } }; Place(total, first++, "Total");
+                total.SelectionChanged += (_, _) => { if (total.SelectedItem is string value && value != column.Total.ToString()) { column.Total = Enum.Parse<QueryTotal>(value); Changed?.Invoke(); } }; Place(total, first++, "Total");
             }
             while (column.Criteria.Count < _criteriaRows) column.Criteria.Add("");
             for (var criteria = 0; criteria < _criteriaRows; criteria++)
