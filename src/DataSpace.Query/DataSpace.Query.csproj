@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Description>Managed SQL parser, expression evaluation and relational query execution for DataSpace.</Description><IsTrimmable>true</IsTrimmable></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../DataSpace.Core/DataSpace.Core.csproj" /></ItemGroup>
+</Project>
