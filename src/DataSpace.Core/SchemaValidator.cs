@@ -35,6 +35,7 @@ public static class SchemaValidator
         foreach (var query in document.Queries)
         {
             if (query.Sql is null || query.Sql.Length > 65536) throw new DataSpaceException("Queries are limited to 65,536 characters.");
+            if (query.DesignerState?.Length > 524288) throw new DataSpaceException("Query designer state is too large.");
             query.Parameters = new(query.Parameters ?? [], StringComparer.OrdinalIgnoreCase);
         }
         foreach (var form in document.Forms)

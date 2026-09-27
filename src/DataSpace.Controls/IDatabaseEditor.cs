@@ -1,6 +1,6 @@
 namespace DataSpace.Controls;
 
-/// <summary>A staged editor. Commit must throw on validation failure and retain the user's draft.</summary>
+/// <summary>A staged editor. Failed validation retains the user's draft.</summary>
 public interface IDatabaseEditor : IDisposable
 {
     bool HasPendingChanges { get; }
@@ -10,16 +10,20 @@ public interface IDatabaseEditor : IDisposable
 internal static class EditorVisuals
 {
     public static ScrollViewer Scroll(UIElement child) => new() { Content = child, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+    public static TextBox Multiline(string value, string placeholder = "")
+    {
+        var input = OfficeVisuals.Input(placeholder: placeholder);
+        // Set the input mode before assigning text; a single-line TextBox can coerce newlines away.
+        input.AcceptsReturn = true; input.TextWrapping = TextWrapping.Wrap; input.Text = value; return input;
+    }
     public static void Labeled(Panel panel, string label, FrameworkElement input)
     {
-        panel.Children.Add(OfficeVisuals.Text(label, 12, "555555"));
-        AutomationProperties.SetName(input, label);
-        panel.Children.Add(input);
+        panel.Children.Add(OfficeVisuals.Text(label, 12, "555555")); AutomationProperties.SetName(input, label); panel.Children.Add(input);
     }
     public static CheckBox Check(string text, bool value, Action<bool> changed)
     {
-        var control = new CheckBox { Content = text, IsChecked = value, MinHeight = 28, FontSize = 12 };
-        control.Checked += (_, _) => changed(true); control.Unchecked += (_, _) => changed(false);
-        return control;
+        var previous = value; var control = new CheckBox { Content = text, IsChecked = value, MinHeight = 28, FontSize = 12 };
+        void Update(bool next) { if (previous == next) return; previous = next; changed(next); }
+        control.Checked += (_, _) => Update(true); control.Unchecked += (_, _) => Update(false); return control;
     }
 }

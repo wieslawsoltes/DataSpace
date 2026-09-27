@@ -32,7 +32,7 @@ public sealed partial class DatabaseWorkspaceView
             case "undo": Workspace.Undo(); ReopenActive(); break;
             case "redo": Workspace.Redo(); ReopenActive(); break;
             case "newTable": case "tableDesign": CreateObject(DatabaseObjectKind.Table, id == "tableDesign"); break;
-            case "newQuery": CreateObject(DatabaseObjectKind.Query); break;
+            case "newQuery": CreateObject(DatabaseObjectKind.Query, true); break;
             case "newForm": CreateObject(DatabaseObjectKind.Form); break;
             case "newReport": CreateObject(DatabaseObjectKind.Report); break;
             case "newMacro": CreateObject(DatabaseObjectKind.Macro); break;

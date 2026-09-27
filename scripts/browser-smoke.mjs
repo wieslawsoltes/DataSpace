@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
+import { queryBrowserChecks } from './query-browser-checks.mjs';
 
 const baseURL = process.env.DATASPACE_URL || 'http://127.0.0.1:4173/DataSpace/';
 const screenshots = process.env.DATASPACE_SCREENSHOTS || 'artifacts/qa';
@@ -95,8 +96,9 @@ try {
         assert.equal(await (await cellInput(editedValue)).inputValue(), editedValue); checks++;
         await page.keyboard.press('Escape');
         await page.screenshot({ path: screenshots + '/after-reload.png', fullPage: true });
+        checks += await queryBrowserChecks(page, baseURL, screenshots, ready);
         assert.deepEqual(failures, [], 'No unhandled browser exceptions or missing runtime assets.'); checks++;
-        console.log(`PASS: ${checks} browser checks (IndexedDB races, corruption, Unicode, Uno startup and real cell edit/save/reload).`);
+        console.log(`PASS: ${checks} browser checks (IndexedDB races, corruption, Unicode, Uno startup, cell edit/save/reload and visual query workflows).`);
     } finally {
         await page.screenshot({ path: screenshots + '/last-state.png', fullPage: true }).catch(() => {});
         await writeFile(screenshots + '/browser-errors.json', JSON.stringify(failures, null, 2));

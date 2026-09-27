@@ -29,6 +29,13 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Test database, query and storage libraries
         run: dotnet test tests/DataSpace.Tests/DataSpace.Tests.csproj -c Release --logger 'trx;LogFileName=tests.trx'
+      - name: Measure reproducible engine scenarios
+        run: dotnet run --project benchmarks/DataSpace.Benchmarks/DataSpace.Benchmarks.csproj -c Release -- artifacts/performance.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: artifacts/performance.json
+          if-no-files-found: error
       - name: Compile reusable renderers
         run: dotnet build src/DataSpace.Rendering/DataSpace.Rendering.csproj -c Release
       - uses: actions/upload-artifact@v4
@@ -38,7 +45,7 @@ jobs:
           path: '**/TestResults/*.trx'
   application:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -84,7 +91,7 @@ jobs:
           for retry in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/DataSpace/storage-test.html > /dev/null && break || sleep 1; done
           node scripts/browser-smoke.mjs 2>&1 | tee artifacts/logs/browser-tests.log
           mkdir -p artifacts/site/qa
-          cp artifacts/qa/workspace.png artifacts/site/qa/workspace.png
+          cp artifacts/qa/*.png artifacts/site/qa/
       - name: Verify all reusable libraries can be packaged
         id: packages
         if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
@@ -95,6 +102,12 @@ jobs:
             dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -v:normal -o artifacts/packages 2>&1 | tee "artifacts/logs/pack-$project.log"
           done
           test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
+      - name: Compile package-only sample consumer on both Uno heads
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-packages.py 2>&1 | tee artifacts/logs/package-consumer.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -110,6 +123,7 @@ jobs:
           path: artifacts/packages/*.nupkg
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
         with:
           name: browser-app
           path: artifacts/site

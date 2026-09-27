@@ -1,53 +1,39 @@
 # Architecture
 
-## Dependency boundaries
+Core owns model, validation, transactions and snapshots. Query and Storage depend on Core. Rendering depends on Core and SkiaSharp, not Uno. Controls combines these libraries as independently usable Uno components. App contains platform entry points, file pickers and browser interop; no reusable library depends on it.
 
-```text
-DataSpace.App ──→ DataSpace.Controls ──→ DataSpace.Rendering ──→ SkiaSharp
-                       │                        │
-                       ├──→ DataSpace.Query ────┤
-                       ├──→ DataSpace.Storage ──┤
-                       └────────────────────────┴──→ DataSpace.Core
-```
+## Transactions and identity
 
-Core does not reference Uno, SkiaSharp, a browser or the application. Query and Storage depend on Core. Rendering depends on Core and SkiaSharp, not Uno. Controls combines those layers in reusable Uno components. Platform-specific concerns are confined to the app host, except for the independently usable browser storage module.
+Records have stable internal IDs separate from visible primary keys. Values are canonically represented as strings in document storage. General `DatabaseWorkspace.Edit` deep-copies the model, applies mutations, validates the candidate, then publishes one undoable revision. Failed edits retain the live document and history.
 
-## Document transaction model
+`UpdateRecords` is the controlled copy-on-write path for cell/range edits. Metadata and record-list containers are copied, unchanged record dictionaries are shared, and only modified rows are cloned. Targeted constraint checks never normalize or mutate shared rows. Cascading parent-key changes use a fully detached fallback. A subsequent generic edit deep-copies shared rows before invoking external mutation code. Undo/redo deep-copy their restored snapshot and retain monotonic revisions.
 
-A database document owns tables, records, indexes, relationships, queries, forms, reports and macros. A record has a stable internal identity separate from its visible primary-key value. Typed field values have a canonical string representation in the serialized document.
+Public model objects are mutable to support serialization/construction. Consumers must not mutate the live document or old snapshots directly; doing so bypasses all transaction and cache guarantees. This is a single-writer workspace, not a concurrently mutable database server.
 
-`DatabaseWorkspace.Edit` clones the current document, invokes the mutation, validates the candidate and publishes it only if all work succeeds. One user operation is one undo entry. Failed conversion, uniqueness, required-field or referential-integrity checks leave the live document and history unchanged. Optional expected revisions prevent a stale detached editor from overwriting a newer document.
+`TableView.Open` returns a snapshot-backed lazy record list with a bounded 256-record display cache. Identity lookup can inspect backing IDs without enumerating/cloning visible records. Filtering/sorting stores an index order; native cells receive detached records on demand. General SQL projections and joins remain read-only because they are not necessarily updatable. See [performance](PERFORMANCE.md) for exact work and memory boundaries.
 
-The controls deliberately stage table schemas, form geometry, report properties and macro steps. Navigation first asks the active editor to commit. A validation failure preserves the view and the draft instead of dismissing it. General SELECT results are read-only because projections and joins are not necessarily updatable. `TableView.Select` separately preserves source record identities for editable sorted/filtered datasheets; it returns detached rows and field metadata so a drag preview cannot mutate the document outside a transaction.
+## SQL and visual design
 
-Public model objects are mutable. Consumers must use the workspace transaction API for edits; direct mutation bypasses history, revision and dirty-state guarantees. Full-document copying favors understandable atomic behavior over large-database scalability. Persistent indexes, incremental transactions, background query scheduling and production-scale memory qualification are future work.
+SQL is tokenized into managed AST plans, not passed to JavaScript eval or a shell. SELECT streams ordinary projections/filters; aggregation/sorting materializes bounded buffers. Eligible qualified equality joins build transient hash buckets, probe candidate rows and still apply the full ON predicate. Other joins retain a work-limited nested-loop path. Stats expose reads, join choices and candidate counts.
 
-## Query execution
+UNION/ALL and TABLE branches use matching column counts, first-branch column names, type normalization and explicit duplicate semantics. Saved read-only queries can serve as sources; recursion is cycle/depth checked and parameters compose with explicit overrides. INSERT SELECT materializes before inserting, including self-appends, inside an atomic workspace transaction.
 
-SQL is tokenized and parsed into internal plans; it is not passed to JavaScript `eval`, an operating-system shell or a remote server. Scalar evaluation, null handling, grouping and typed comparisons run in managed code. Query options bound intermediate and result sizes, and execution accepts cancellation tokens. Action statements are applied inside a workspace transaction. The UI additionally asks for confirmation before an action query runs.
+`QueryDesign` is independent of Uno/Skia. It represents SELECT sources, joins, projected columns, sort order, aggregate choices and AND/OR criteria. SQL remains authoritative: `Restore` accepts serialized layout only when generated SQL agrees with the supplied SQL. Unsupported or malformed state falls back to parsing SQL. Unsupported compound/action SQL remains in SQL View rather than being overwritten by an approximate diagram.
 
-Saved SQL dependency rewriting is intentionally conservative: table/field renames and drops are blocked while saved queries exist rather than editing arbitrary SQL substrings. This is a safety restriction, not a complete SQL dependency graph. The SELECT builder explicitly replaces its SQL text when Generate is pressed; it is not a bidirectional graphical Access query designer.
+The native Uno QBE grid and draggable source cards edit this detached model. Table, index, form, report and macro editors likewise retain drafts until validation succeeds. Field/table SQL dependency rewriting is still conservative, not a full dependency graph.
 
-## Rendering and input
+## Rendering and lifetime
 
-Renderers accept `SKCanvas`, logical dimensions, model data and small view-state objects. They can be used outside Uno for offscreen rendering. The Uno `SkiaSurface` chooses the shared `SKCanvasElement` path when supported and otherwise uses a DPI-scaled `SKXamlCanvas`. Drawing state is restored after each paint; pointer coordinates remain in logical units. The host supplies the platform renderer; physical GPU behavior depends on Uno, the operating system and the browser.
+Renderers consume SKCanvas and logical units; they can be used independently for offscreen/native rendering. `SkiaSurface` uses the shared Uno canvas where available and a DPI-correct SKXamlCanvas fallback otherwise. Native Uno TextBox controls provide text editing. Datasheets draw visible cells and cache aggregate totals against record snapshots. The host chooses backend/hardware behavior; hardware-GPU performance is not implied by headless CI.
 
-The datasheet draws visible rows and columns, and uses a native Uno text input for editing rather than simulating a text caret in pixels. Forms use native text/checkbox controls in record view and Skia drawing in design view. Report preview and PDF export share the page renderer. Screen-reader semantics for individual canvas cells and comprehensive accessibility qualification remain incomplete.
+## Persistence
 
-## Persistence and concurrency
+`IWorkspaceStore` loads serialized content with an opaque version and atomically saves against an expected version. `WorkspaceSession` serializes storage operations and tracks the exact saved snapshot, so edits during I/O remain dirty. Initialization validates before replacing data and rejects concurrent edits or corrupt content rather than discarding them.
 
-`IWorkspaceStore` is a two-method optimistic-storage contract. Load returns serialized content and an opaque version. Save must compare the expected version atomically and return the committed version. Memory and file stores support tests and desktop hosts; IndexedDB supplies browser persistence.
+Browser IndexedDB compares and writes in one read-write transaction across tabs, retaining one previous generation. This supplies conflict detection, not collaborative merging, authentication or an audit log. The host imports browser modules relative to document.baseURI for repository-subpath deployment.
 
-`WorkspaceSession` serializes storage operations. It records the exact document reference successfully saved, so an edit during asynchronous I/O remains dirty. Initialization deserializes and validates before replacing the workspace and rejects a concurrent edit rather than discarding it. A failed initialization leaves saving disabled until successful initialization; exporting an independent copy remains possible.
+## Dependency and verification boundaries
 
-`IndexedWorkspaceStore` compares and writes inside one `readwrite` transaction, including when different tabs hold different connections. It keeps one previous envelope. Corrupt envelopes, stale versions and failed writes reject without marking the session clean. This is conflict detection, not live collaboration, authentication, access control or an audit log.
+The single-project Uno application has desktop and browser targets. A version-scoped build target adapts Uno 6.7's unmodified C GL shim to SkiaSharp 4.152.1's C++20 link invocation using an intermediate extern-C wrapper. It does not modify NuGet caches or substitute a graphics implementation; review/remove it when upgrading to a compatible dependency combination.
 
-## Hosting and build compatibility
-
-The single-project Uno application has desktop and WebAssembly entry points. The browser imports an ES module by an absolute URL derived from `document.baseURI`, so it works under the GitHub Pages repository subpath. No application data is uploaded to GitHub by this storage adapter.
-
-`Directory.Build.targets` contains a narrowly scoped Uno 6.7 / SkiaSharp 4.152.1 build adaptation. SkiaSharp's WebGPU bridge adds C++20 linker flags while Uno supplies a raw C GL shim. The target copies that installed shim unchanged into the intermediate directory and includes it from a C++ translation unit under `extern "C"`. The adaptation retains C exports, changes no NuGet cache files and does not substitute a different graphics implementation. Re-evaluate and remove it when upgrading to a dependency combination that resolves the mixed-language link command.
-
-## Validation boundaries
-
-Managed regression tests cover database constraints, rollback, history, SQL, CSV, storage conflicts, save races, schema drafts and editable row identity. Headless browser checks use real IndexedDB and start the actual compiled Uno application. They do not establish full interaction parity, pixel equality, native OS behavior, assistive-technology support, hardware-GPU performance, or safe handling of every adversarial file. Read the compatibility matrix and recorded CI results separately.
+CI tests engine semantics, optimized/reference result equivalence, bounded materialization and rollback, then publishes the real browser app and exercises native UI interactions/IndexedDB. It also packages all five libraries and records reproducible benchmarks. These checks do not establish full Access compatibility, native OS behavior, all accessibility/security requirements, production scaling or independent downstream package-consumer qualification.

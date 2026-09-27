@@ -4,13 +4,15 @@ public sealed record RibbonCommand(string Id, string Label, string Icon, bool La
 public sealed record RibbonGroup(string Label, IReadOnlyList<RibbonCommand> Commands);
 public sealed record RibbonTab(string Id, string Label, IReadOnlyList<RibbonGroup> Groups, bool Contextual = false);
 
-/// <summary>A standalone, data-driven Office ribbon with custom groups, command routing and collapse behavior.</summary>
+/// <summary>Standalone data-driven Office ribbon with retained command state and stable tab focus.</summary>
 public sealed class OfficeRibbon : UserControl
 {
     private readonly StackPanel _tabs = new() { Orientation = Orientation.Horizontal, Spacing = 0 };
     private readonly StackPanel _groups = new() { Orientation = Orientation.Horizontal, Spacing = 0 };
     private readonly ScrollViewer _groupScroll;
     private readonly Dictionary<string, List<Button>> _commandButtons = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> _enabled = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Button> _tabButtons = new(StringComparer.Ordinal);
     private IReadOnlyList<RibbonTab> _definitions = [];
     private string _selected = "home";
     public event Action<string>? CommandInvoked;
@@ -39,23 +41,35 @@ public sealed class OfficeRibbon : UserControl
     {
         if (id == "file") { CommandInvoked?.Invoke("file"); return; }
         if (!_definitions.Any(t => t.Id == id)) return;
-        _selected = id; IsCollapsed = false; _groupScroll.Visibility = Visibility.Visible;
-        BuildTabs(); BuildGroups(); TabSelected?.Invoke(id);
+        IsCollapsed = false; _groupScroll.Visibility = Visibility.Visible;
+        if (_selected == id) return;
+        _selected = id; StyleTabs(); BuildGroups(); TabSelected?.Invoke(id);
     }
     public void ToggleCollapsed() { IsCollapsed = !IsCollapsed; _groupScroll.Visibility = IsCollapsed ? Visibility.Collapsed : Visibility.Visible; }
     public void SetCommandEnabled(string id, bool enabled)
-    { if (_commandButtons.TryGetValue(id, out var buttons)) foreach (var button in buttons) button.IsEnabled = enabled; }
+    {
+        _enabled[id] = enabled;
+        if (_commandButtons.TryGetValue(id, out var buttons)) foreach (var button in buttons) button.IsEnabled = enabled;
+    }
     private void BuildTabs()
     {
-        _tabs.Children.Clear();
+        _tabs.Children.Clear(); _tabButtons.Clear();
         foreach (var tab in _definitions)
         {
             var button = OfficeVisuals.Button(tab.Label, () => SelectTab(tab.Id), automationId: "RibbonTab_" + tab.Id);
             button.MinWidth = tab.Id == "file" ? 58 : 66; button.Height = 32; button.Padding = new(16, 4, 16, 4);
+            button.DoubleTapped += (_, _) => ToggleCollapsed(); _tabs.Children.Add(button); _tabButtons[tab.Id] = button;
+        }
+        StyleTabs();
+    }
+    private void StyleTabs()
+    {
+        foreach (var tab in _definitions)
+        {
+            var button = _tabButtons[tab.Id];
             button.Background = OfficeVisuals.Brush(tab.Id == "file" ? "A4373A" : tab.Id == _selected ? "FAFAFA" : tab.Contextual ? "E8F0EA" : "F7F7F7");
             button.Foreground = OfficeVisuals.Brush(tab.Id == "file" ? "FFFFFF" : tab.Id == _selected ? "A4373A" : "252525");
             button.BorderBrush = OfficeVisuals.Brush(tab.Id == _selected ? "C8CDD1" : "00000000"); button.BorderThickness = tab.Id == _selected ? new(1, 1, 1, 0) : new(0);
-            button.DoubleTapped += (_, _) => ToggleCollapsed(); _tabs.Children.Add(button);
         }
     }
     private void BuildGroups()
@@ -72,8 +86,8 @@ public sealed class OfficeRibbon : UserControl
                 var button = OfficeVisuals.Button(command.Label, () => CommandInvoked?.Invoke(command.Id), automationId: "Command_" + command.Id);
                 var content = new StackPanel { Orientation = command.Large ? Orientation.Vertical : Orientation.Horizontal, Spacing = command.Large ? 5 : 6, HorizontalAlignment = HorizontalAlignment.Center };
                 content.Children.Add(new OfficeIcon(command.Icon) { Width = command.Large ? 30 : 16, Height = command.Large ? 30 : 16, HorizontalAlignment = HorizontalAlignment.Center });
-                var text = OfficeVisuals.Text(command.Label, 11.5); text.TextAlignment = TextAlignment.Center;
-                content.Children.Add(text); button.Content = content; button.IsEnabled = command.Enabled;
+                var text = OfficeVisuals.Text(command.Label, 11.5); text.TextAlignment = TextAlignment.Center; content.Children.Add(text); button.Content = content;
+                button.IsEnabled = _enabled.TryGetValue(command.Id, out var enabled) ? enabled : command.Enabled;
                 button.Height = command.Large ? 75 : 25; button.Padding = command.Large ? new(7, 5, 7, 4) : new(4, 2, 5, 2);
                 button.HorizontalContentAlignment = command.Large ? HorizontalAlignment.Center : HorizontalAlignment.Left;
                 ToolTipService.SetToolTip(button, command.Label + (command.Shortcut is null ? "" : " (" + command.Shortcut + ")"));
@@ -87,8 +101,7 @@ public sealed class OfficeRibbon : UserControl
                 }
             }
             OfficeVisuals.Add(container, row);
-            var label = OfficeVisuals.Text(group.Label, 10.5, "666666"); label.HorizontalAlignment = HorizontalAlignment.Center;
-            OfficeVisuals.Add(container, label, 1);
+            var label = OfficeVisuals.Text(group.Label, 10.5, "666666"); label.HorizontalAlignment = HorizontalAlignment.Center; OfficeVisuals.Add(container, label, 1);
             _groups.Children.Add(OfficeVisuals.Border(container, "FAFAFA", "D9D9D9", new(0, 0, 1, 0)));
         }
     }

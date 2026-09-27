@@ -9,7 +9,9 @@ internal sealed record Projection(Expr Expression, string? Alias = null, string?
 internal sealed record Join(string Kind, Source Source, Expr? Condition);
 internal sealed record Ordering(Expr Expression, bool Descending);
 internal sealed record SelectStatement(List<Projection> Projections, Source? Source, List<Join> Joins, Expr? Where, List<Expr> Groups, Expr? Having, List<Ordering> Order, bool Distinct, int? Limit, int Offset) : Statement;
+internal sealed record UnionStatement(List<SelectStatement> Queries, List<bool> All, List<Ordering> Order) : Statement;
 internal sealed record InsertStatement(string Table, List<string> Fields, List<List<Expr>> Rows) : Statement;
+internal sealed record InsertSelectStatement(string Table, List<string> Fields, Statement Query) : Statement;
 internal sealed record UpdateStatement(string Table, List<(string Field, Expr Value)> Assignments, Expr? Where) : Statement;
 internal sealed record DeleteStatement(string Table, Expr? Where) : Statement;
 internal sealed record CreateStatement(TableDefinition Table) : Statement;
@@ -19,8 +21,7 @@ internal sealed record DropStatement(string Table) : Statement;
 internal sealed class SqlParser
 {
     private readonly List<Token> _tokens;
-    private int _index;
-    private int _depth;
+    private int _index, _depth;
     private Token Current => _tokens[_index];
     public SqlParser(string sql) { _tokens = SqlLexer.Read(sql); }
     private bool Is(string value) => (Current.Kind is TokenKind.Word or TokenKind.Symbol) && Names.Equal(Current.Text, value);
@@ -36,7 +37,8 @@ internal sealed class SqlParser
     public Statement Parse()
     {
         Statement statement;
-        if (Match("SELECT")) statement = Select();
+        if (Match("SELECT")) statement = ReadQuery(Select());
+        else if (Match("TABLE")) statement = ReadQuery(TableSelect());
         else if (Match("INSERT")) statement = Insert();
         else if (Match("UPDATE")) statement = Update();
         else if (Match("DELETE")) { Expect("FROM"); var table = Identifier(); statement = new DeleteStatement(table, Match("WHERE") ? Expression() : null); }
@@ -52,8 +54,29 @@ internal sealed class SqlParser
             else { Expect("DROP"); Match("COLUMN"); statement = new AlterStatement(table, null, Identifier()); }
         }
         else if (Match("DROP")) { Expect("TABLE"); statement = new DropStatement(Identifier()); }
-        else throw Error("Expected SELECT, INSERT, UPDATE, DELETE, CREATE TABLE, ALTER TABLE or DROP TABLE");
+        else throw Error("Expected SELECT, TABLE, INSERT, UPDATE, DELETE, CREATE TABLE, ALTER TABLE or DROP TABLE");
         End(); return statement;
+    }
+    private Statement ReadQuery(SelectStatement first)
+    {
+        if (!Is("UNION")) return first;
+        var queries = new List<SelectStatement> { first }; var all = new List<bool>();
+        while (Match("UNION"))
+        {
+            if (queries.Count >= 32) throw Error("At most 32 UNION branches are supported");
+            if (queries[^1].Order.Count > 0) throw Error("ORDER BY must follow the final UNION branch");
+            all.Add(Match("ALL"));
+            if (Match("SELECT")) queries.Add(Select());
+            else { Expect("TABLE"); queries.Add(TableSelect()); }
+        }
+        var order = queries[^1].Order;
+        queries[^1] = queries[^1] with { Order = [] };
+        return new UnionStatement(queries, all, order);
+    }
+    private SelectStatement TableSelect()
+    {
+        var name = Identifier(); var order = Order();
+        return new([new(new StarExpr(), Wildcard: "")], new(name, name), [], null, [], null, order, false, null, 0);
     }
     private static readonly HashSet<string> ClauseWords = new(StringComparer.OrdinalIgnoreCase)
         { "FROM", "WHERE", "GROUP", "HAVING", "ORDER", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "OUTER", "JOIN", "ON", "LIMIT", "OFFSET", "UNION", "ASC", "DESC", "SET", "VALUES" };
@@ -62,14 +85,20 @@ internal sealed class SqlParser
         if (Match("AS")) return Identifier();
         return Current.Kind == TokenKind.QuotedName || Current.Kind == TokenKind.Word && !ClauseWords.Contains(Current.Text) ? Identifier() : null;
     }
-    private Source Source()
+    private Source Source() { var table = Identifier(); return new(table, Alias() ?? table); }
+    private List<Ordering> Order()
     {
-        var table = Identifier(); return new(table, Alias() ?? table);
+        var order = new List<Ordering>();
+        if (Match("ORDER"))
+        {
+            Expect("BY");
+            do { var expression = Expression(); var descending = Match("DESC"); if (!descending) Match("ASC"); order.Add(new(expression, descending)); } while (Match(","));
+        }
+        return order;
     }
     private SelectStatement Select()
     {
-        var distinct = Match("DISTINCT");
-        int? limit = Match("TOP") ? PositiveInteger() : null;
+        var distinct = Match("DISTINCT"); int? limit = Match("TOP") ? PositiveInteger() : null;
         var projections = new List<Projection>();
         do
         {
@@ -97,13 +126,7 @@ internal sealed class SqlParser
         var where = Match("WHERE") ? Expression() : null;
         var groups = new List<Expr>();
         if (Match("GROUP")) { Expect("BY"); do groups.Add(Expression()); while (Match(",")); }
-        var having = Match("HAVING") ? Expression() : null;
-        var order = new List<Ordering>();
-        if (Match("ORDER"))
-        {
-            Expect("BY");
-            do { var expression = Expression(); var descending = Match("DESC"); if (!descending) Match("ASC"); order.Add(new(expression, descending)); } while (Match(","));
-        }
+        var having = Match("HAVING") ? Expression() : null; var order = Order();
         if (Match("LIMIT")) limit = PositiveInteger();
         var offset = Match("OFFSET") ? PositiveInteger() : 0;
         return new(projections, sourceTable, joins, where, groups, having, order, distinct, limit, offset);
@@ -113,13 +136,14 @@ internal sealed class SqlParser
         if (Current.Kind != TokenKind.Number || !int.TryParse(Current.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value < 0) throw Error("Expected a non-negative integer");
         _index++; return value;
     }
-    private InsertStatement Insert()
+    private Statement Insert()
     {
         Expect("INTO"); var table = Identifier(); var fields = new List<string>();
         if (Match("(")) { do fields.Add(Identifier()); while (Match(",")); Expect(")"); }
+        if (Match("SELECT")) return new InsertSelectStatement(table, fields, ReadQuery(Select()));
         Expect("VALUES"); var rows = new List<List<Expr>>();
         do { Expect("("); var row = new List<Expr>(); do row.Add(Expression()); while (Match(",")); Expect(")"); rows.Add(row); } while (Match(","));
-        return new(table, fields, rows);
+        return new InsertStatement(table, fields, rows);
     }
     private UpdateStatement Update()
     {
@@ -135,13 +159,10 @@ internal sealed class SqlParser
             "COUNTER" or "AUTOINCREMENT" or "AUTONUMBER" => FieldType.AutoNumber,
             "INT" or "INTEGER" or "LONG" or "SHORT" or "BIGINT" => FieldType.Integer,
             "DECIMAL" or "NUMERIC" or "DOUBLE" or "SINGLE" or "FLOAT" => FieldType.Decimal,
-            "CURRENCY" or "MONEY" => FieldType.Currency,
-            "DATETIME" or "DATE" => FieldType.DateTime,
-            "BIT" or "YESNO" or "BOOLEAN" => FieldType.YesNo,
-            "MEMO" or "LONGTEXT" => FieldType.LongText,
+            "CURRENCY" or "MONEY" => FieldType.Currency, "DATETIME" or "DATE" => FieldType.DateTime,
+            "BIT" or "YESNO" or "BOOLEAN" => FieldType.YesNo, "MEMO" or "LONGTEXT" => FieldType.LongText,
             "TEXT" or "VARCHAR" or "CHAR" or "SHORTTEXT" => FieldType.ShortText,
-            "GUID" or "UNIQUEIDENTIFIER" => FieldType.Guid,
-            _ => throw Error($"Unsupported data type '{typeName}'")
+            "GUID" or "UNIQUEIDENTIFIER" => FieldType.Guid, _ => throw Error($"Unsupported data type '{typeName}'")
         };
         var field = new FieldDefinition { Name = name, Type = type };
         if (Match("(")) { field.MaxLength = PositiveInteger(); Expect(")"); }
@@ -154,7 +175,6 @@ internal sealed class SqlParser
         }
         return field;
     }
-
     public Expr Expression(int minimum = 0)
     {
         if (++_depth > 64) throw Error("Expression nesting exceeds 64 levels");
@@ -186,10 +206,7 @@ internal sealed class SqlParser
                 if (Match("("))
                 {
                     var args = new List<Expr>();
-                    if (!Match(")"))
-                    {
-                        do args.Add(Match("*") ? new StarExpr() : Expression()); while (Match(",")); Expect(")");
-                    }
+                    if (!Match(")")) { do args.Add(Match("*") ? new StarExpr() : Expression()); while (Match(",")); Expect(")"); }
                     left = new FunctionExpr(name.ToUpperInvariant(), args);
                 }
                 else { if (Match(".")) name += "." + Identifier(); left = new NameExpr(name); }
@@ -201,8 +218,7 @@ internal sealed class SqlParser
                 var precedence = Current.Kind is not (TokenKind.Word or TokenKind.Symbol) ? -1 : op switch
                 { "OR" => 1, "AND" => 2, "=" or "<>" or "!=" or "<" or ">" or "<=" or ">=" or "IS" or "LIKE" or "IN" or "BETWEEN" or "NOT" => 3, "&" => 4, "+" or "-" => 5, "*" or "/" or "%" => 6, _ => -1 };
                 if (precedence < minimum) break;
-                _index++;
-                var negated = op == "NOT";
+                _index++; var negated = op == "NOT";
                 if (negated) { op = Current.Text.ToUpperInvariant(); if (!Match("LIKE") && !Match("IN") && !Match("BETWEEN")) throw Error("Expected LIKE, IN or BETWEEN after NOT"); }
                 if (op == "IS") { var not = Match("NOT"); Expect("NULL"); left = new NullExpr(left, not); }
                 else if (op == "IN")

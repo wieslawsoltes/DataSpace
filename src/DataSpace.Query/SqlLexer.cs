@@ -11,15 +11,19 @@ internal static class SqlLexer
     public static List<Token> Read(string sql)
     {
         if (sql.Length > 65536) throw new DataSpaceException("SQL is limited to 65,536 characters.");
-        var tokens = new List<Token>();
-        var i = 0;
+        var tokens = new List<Token>(); var i = 0;
         while (i < sql.Length)
         {
             if (tokens.Count > 20000) throw new DataSpaceException("The SQL statement contains too many tokens.");
             var c = sql[i];
             if (char.IsWhiteSpace(c)) { i++; continue; }
             if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
-            { while (i < sql.Length && sql[i] != '\n') i++; continue; }
+            {
+                // Native multiline editors can use CR alone. Never swallow a later
+                // WHERE clause merely because its line ending is not LF.
+                while (i < sql.Length && sql[i] is not '\n' and not '\r') i++;
+                continue;
+            }
             if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
             {
                 var end = sql.IndexOf("*/", i + 2, StringComparison.Ordinal);
@@ -29,9 +33,7 @@ internal static class SqlLexer
             var start = i++;
             if (c is '\'' or '"' or '[' or '#')
             {
-                var close = c == '[' ? ']' : c;
-                var text = new StringBuilder();
-                var closed = false;
+                var close = c == '[' ? ']' : c; var text = new StringBuilder(); var closed = false;
                 while (i < sql.Length)
                 {
                     if (sql[i] == close)
@@ -66,8 +68,7 @@ internal static class SqlLexer
                 tokens.Add(new(TokenKind.Symbol, text, start));
             }
         }
-        tokens.Add(new(TokenKind.End, "", sql.Length));
-        return tokens;
+        tokens.Add(new(TokenKind.End, "", sql.Length)); return tokens;
     }
-    public static DataSpaceException Error(string message, int position) => new($"{message} at character {position + 1}.");
+    internal static DataSpaceException Error(string message, int position) => new($"{message} at character {position + 1}.");
 }

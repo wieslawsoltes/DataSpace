@@ -1,72 +1,66 @@
 # DataSpace
 
-**A modular database studio for the browser and desktop, built with Uno Platform and SkiaSharp.**
+**A modular Access-style database studio for the browser and desktop, built with Uno Platform and SkiaSharp.**
 
 [![Build, test and deploy](https://github.com/wieslawsoltes/DataSpace/actions/workflows/build.yml/badge.svg)](https://github.com/wieslawsoltes/DataSpace/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[Browser application](https://wieslawsoltes.github.io/DataSpace/) · [Releases](https://github.com/wieslawsoltes/DataSpace/releases) · [Architecture](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Contributing](CONTRIBUTING.md)
+[Browser application](https://wieslawsoltes.github.io/DataSpace/) · [Architecture](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Performance](docs/PERFORMANCE.md) · [Contributing](CONTRIBUTING.md)
 
-DataSpace brings an Access-style ribbon, navigation pane, tabbed objects, editable datasheets, SQL queries, form design, report previews and relationship diagrams to a shared .NET codebase. The browser application is the actual Uno/Skia application compiled to WebAssembly—not an HTML mockup or a different front end.
+DataSpace brings an Office-style ribbon, searchable object navigation, tabbed objects, editable datasheets, graphical queries, form design, report previews and relationship diagrams to a shared .NET codebase. The browser is the actual Uno/Skia application compiled to WebAssembly—not an HTML mockup or a separate front end.
 
-> **Status: early implementation.** The familiar layout is an independent implementation, not verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA, linked server databases and the complete Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before using existing database files or planning a migration.
+> **0.2.0-preview.1:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
 
 ## Workspace
 
-| Area | Implemented behavior |
+| Area | Implemented workflows |
 | --- | --- |
-| Application shell | Access-style red title bar, quick-access commands, grouped ribbon, File backstage, searchable object navigation, document tabs, record navigation and status/error surfaces. |
-| Tables | Typed fields, record insert/update/delete, primary and unique constraints, required values, field defaults, transactional undo/redo, detached table-design drafts and field property editing. |
-| Datasheets | Skia-drawn visible cells, row/range selection, keyboard navigation, in-place native text editing, TSV clipboard, sortable/resizable columns, filters, search and totals. Sorted and filtered edits preserve source record identities. |
-| Queries | Managed SQL parser/evaluator, SQL and parameter editing, explicit SELECT builder, read-only result grids, aggregation and joins within the supported dialect, confirmed atomic action queries. |
-| Forms | Bound record entry, text and Yes/No controls, record navigation, visual layout selection, drag/resize with grid snapping, control creation/deletion, geometry and caption properties. |
-| Reports | Table or saved-query sources, field selection, title/orientation editing, pagination, zoom and Skia PDF export using the same page renderer. |
-| Relationships | Draggable table cards, relationship creation/removal, referential integrity and configured cascading changes. |
-| Macros | Ordered, explicitly invoked actions for opening objects, filtering, record navigation and saving. No imported macro automatically executes. |
-| Files and persistence | Versioned `.dspace` JSON documents, CSV import/export, local desktop files, transactional IndexedDB browser storage, cross-tab optimistic conflict detection and explicit file backups. |
+| Shell | Red title bar, quick-access commands, grouped ribbon, File backstage, searchable objects, tabs, record navigation and explicit errors. |
+| Tables | Typed fields, insert/update/delete, required/default/primary/unique constraints, atomic undo/redo, detached field design and ordered single/composite index editing. |
+| Datasheets | Visible-cell Skia drawing, lazy row materialization, range selection, keyboard navigation, native text editing, TSV clipboard, sorting, resizing, filtering, debounced search and cached totals. |
+| Queries | SQL and parameter editing, native QBE grid, draggable source cards, join properties, criteria/OR rows, grouping, SELECT SQL round trips and read-only result grids. |
+| Query engine | Streaming SELECT/TOP, transient equality hash joins, supported expressions/aggregation, UNION/UNION ALL, saved-query sources and confirmed atomic action statements including INSERT SELECT. |
+| Forms | Bound record entry, text/YesNo controls, navigation, snapped control drag/resize, creation/deletion and geometry/caption properties. |
+| Reports | Table/query source, columns, title/orientation, pagination, zoom and Skia PDF export through the same page renderer. |
+| Relationships and macros | Referential checks/cascades, draggable relationship diagrams, and explicitly invoked ordered workspace macro actions. |
+| Files | Versioned `.dspace` JSON, CSV import/export, desktop file adapters, transactional IndexedDB, cross-tab version checks and explicit backup exports. |
 
-The initial workspace contains a small Northwind-style demonstration database. Its records are sample data. Use **File → New** for an empty database or **External Data → Text File** to import CSV.
+The Northwind-style initial workspace contains demonstration data. Use **File → New** to create a database or **External Data → Text File** to import CSV. In a query, switch between **Design View**, **SQL View** and **Datasheet View**. Compound/action SQL stays in SQL View when it cannot be represented by the SELECT designer. In table Design View, **Indexes** opens the reusable ordered index editor.
 
-## Run and build
+## Build and run
 
-The repository pins **Uno.Sdk 6.7.30**, **SkiaSharp 4.152.1** and the **.NET 10** SDK family. Managed and native Skia packages are aligned with `SkiaSharpVersion`; changing only one package can cause runtime or restore failures.
+The repository pins **Uno.Sdk 6.7.30**, matched **SkiaSharp 4.152.1** packages and the **.NET 10** SDK family. Managed and native Skia versions must remain aligned.
 
 ```bash
 git clone https://github.com/wieslawsoltes/DataSpace.git
 cd DataSpace
 dotnet workload install wasm-tools
 
-# Managed database/query/storage regression suite
 dotnet test tests/DataSpace.Tests/DataSpace.Tests.csproj -c Release
-
-# Desktop application: choose the backend for the current operating system
 dotnet run --project src/DataSpace.App/DataSpace.App.csproj -f net10.0-desktop
 
-# Build the actual browser application
+# Publish the real browser application
 dotnet publish src/DataSpace.App/DataSpace.App.csproj \
   -c Release -f net10.0-browserwasm -o artifacts/publish
 python3 scripts/stage-site.py
 python3 -m http.server 8080 --directory artifacts/site
 ```
 
-Open `http://localhost:8080/`. Do not open `index.html` through `file://`: the WebAssembly runtime and module imports require an HTTP(S) origin. A desktop display server and the native dependencies of the selected Uno backend are required to run the desktop host. The CI pipeline separately compiles the desktop host and runs the browser host in headless Chromium.
-
-For browser checks using the same project subpath as GitHub Pages, see [CONTRIBUTING.md](CONTRIBUTING.md). The site uses a relative application base path, and the standard build does not require cross-origin-isolation headers or WebAssembly threads.
+Open `http://localhost:8080/`, not `file://`. Desktop execution requires the selected Uno backend's native dependencies and display server. The browser build uses a relative base path and does not require cross-origin-isolation headers or WebAssembly threads.
 
 ## Independently reusable libraries
 
-| Package/project | Responsibility | Depends on the app? |
-| --- | --- | --- |
-| `DataSpace.Core` | Document model, typed values, schema/relationship validation, record operations, schema drafts, object factories, transaction history and JSON codec. | No |
-| `DataSpace.Query` | Managed SQL, scalar expressions and identity-preserving editable table views. | No |
-| `DataSpace.Storage` | CSV, optimistic stores and asynchronous save-session coordination. | No |
-| `DataSpace.Rendering` | Skia datasheet, form, relationship, report and icon renderers. | No |
-| `DataSpace.Controls` | Reusable Uno controls, resource styles, object editors and the complete optional workspace shell. | No |
-| `DataSpace.App` | Thin desktop/WebAssembly entry points, platform file pickers and browser interop. | Application host |
+| Package | Responsibility |
+| --- | --- |
+| `DataSpace.Core` | Model, typed values, validation, record/schema/index transactions, history, snapshots and document codec. |
+| `DataSpace.Query` | SQL parsing/evaluation, QBE model/translation, query statistics and lazy identity-preserving table views. |
+| `DataSpace.Storage` | CSV, optimistic storage contracts/adapters and asynchronous save-session coordination. |
+| `DataSpace.Rendering` | Independent Skia datasheet, form, relationship, report and icon renderers. |
+| `DataSpace.Controls` | Reusable Uno ribbon/navigation/datasheet, object designers, resource styles and optional full workspace shell. |
 
-All five libraries can be built and packaged separately. A release workflow creates `.nupkg` files and a browser distribution as GitHub Release assets. It does **not** automatically publish to NuGet.org. Referencing a library project directly is also supported.
+None depends on `DataSpace.App`. The thin app injects platform file dialogs and browser interop. CI packages all five libraries; the tag workflow attaches packages to GitHub Releases without publishing to NuGet.org. The controls library uses a portable `net10.0` package asset and is compiled through both app heads.
 
-### Use the engine without Uno
+### Engine usage without Uno
 
 ```csharp
 using DataSpace.Core;
@@ -75,26 +69,21 @@ using DataSpace.Query;
 var workspace = new DatabaseWorkspace(new DatabaseDocument { Name = "Inventory" });
 workspace.Edit("Create table", document => ObjectFactory.CreateTable(document));
 workspace.Edit("Add record", document => RecordOperations.Insert(
-    document.Table("Table1"),
-    new Dictionary<string, string?> { ["Title"] = "Notebook" }));
+    document.Table("Table1"), new Dictionary<string, string?> { ["Title"] = "Notebook" }));
 
+var view = TableView.Open(workspace.Document, "Table1", sortField: "Title");
+var firstPage = view.ReadPage(0, 50);
+workspace.UpdateRecords("Edit title", "Table1", [new(firstPage[0].Id, "Title", "Drawing pad")]);
 var result = new QueryEngine().Select(workspace.Document,
-    "SELECT ID, Title FROM Table1 ORDER BY Title");
-
-// Editable table views retain the identity of the original records.
-var view = TableView.Select(workspace.Document, "Table1", sortField: "Title");
+    "SELECT ID, Title FROM Table1 UNION ALL SELECT 0, 'Unassigned' ORDER BY Title");
 workspace.Undo();
 ```
 
-Edit models through `DatabaseWorkspace.Edit`, not by changing `Workspace.Document` directly. Transactions validate a detached copy and only replace the live document on success. The public model is mutable for serialization and construction; it is not an immutable collection API.
+Only mutate live data through `DatabaseWorkspace.Edit` or `UpdateRecords`. Public models remain mutable for construction/serialization, but direct mutation bypasses history, validation and cache guarantees. Virtual-view records are detached display snapshots, not backing storage. Use `TableView.Select` for the compatible eager result API.
 
-### Host the controls in another Uno application
+### Embed the workspace
 
 ```csharp
-using DataSpace.Controls;
-using DataSpace.Core;
-using DataSpace.Storage;
-
 var workspace = new DatabaseWorkspace(SampleDatabase.Create());
 var session = new WorkspaceSession(workspace, new MemoryWorkspaceStore());
 await session.InitializeAsync();
@@ -103,28 +92,31 @@ var view = new DatabaseWorkspaceView(workspace)
     StorageIsDirty = () => session.IsDirty,
     SaveDatabaseAsync = () => session.SaveAsync()
 };
-// Place view in your window/page. Inject ImportTextAsync and ExportFileAsync
-// for your own file-dialog or document-management integration.
+// Put view in your Uno page/window. Inject ImportTextAsync and ExportFileAsync
+// for your file-dialog or document-management integration.
 ```
 
-Merge `ms-appx:///DataSpace.Controls/Themes/OfficeResources.xaml` into the host application's resources to use the supplied Office-style component templates. Individual controls such as `DatasheetControl`, `OfficeRibbon`, `TableDesignerControl` and `FormEditorControl` do not require the complete shell.
+The embedding example uses `DataSpace.Core`, `DataSpace.Storage` and `DataSpace.Controls`. Merge `ms-appx:///DataSpace.Controls/Themes/OfficeResources.xaml` for supplied styling. Individual controls and designers do not require the shell. Dispose owned views, renderers and sessions when their host is finished.
 
-## Saving and protecting work
+## Performance and verification
 
-**Ctrl+S / Save** commits the active editor and saves the current document locally. In the browser, local data belongs to the current origin and browser profile. Clearing site data, using a private session or losing that profile may remove it. **Export a `.dspace` file for a separate backup.** Storage is not encrypted and is not a cloud service.
+Targeted edits avoid whole-database JSON copying, lazy datasheets materialize visible rows, totals are snapshot-cached, and eligible joins use transient hash lookups. [Performance documentation](docs/PERFORMANCE.md) records reproducible managed benchmarks, work counters and remaining limits. Those measurements are not browser/GPU/frame-rate claims.
 
-Browser saves compare the expected stored version and replace the data in one IndexedDB transaction. A competing tab produces a conflict instead of silently overwriting another tab. Export the losing tab's work before reloading. Saves retain the prior committed browser generation, but a recovery-management UI is not yet implemented.
+```bash
+dotnet run --project benchmarks/DataSpace.Benchmarks/DataSpace.Benchmarks.csproj \
+  -c Release -- artifacts/performance.json
+```
 
-Invalid stored documents are not silently replaced. Failed validation retains editor drafts. Edits made while a save is in progress remain dirty after the older snapshot finishes saving. Undo/redo is bounded in-memory history; it is not a persistent audit log.
+`build.yml` runs managed regressions and benchmarks, compiles desktop, publishes WebAssembly, exercises real IndexedDB and browser interactions, packages the libraries and deploys verified `main` builds. PRs never deploy. Exact source, TRX, performance JSON, packages, screenshots and diagnostics are retained as artifacts. See [CONTRIBUTING.md](CONTRIBUTING.md) for browser-test commands.
 
-## Automation and releases
+`release.yml` verifies version tags and attaches package, browser and source archives with checksums to GitHub Releases. Creating a workflow does not imply that a release has been published; check the release history and CI results.
 
-`build.yml` tests the managed engine, compiles the desktop host, publishes the browser host, checks real IndexedDB behavior in two browser tabs, launches the real Uno application, captures screenshots and publishes the verified static artifact to GitHub Pages on `main`. Pull requests never deploy. Browser diagnostics and test results are retained as workflow artifacts.
+## Save and protect work
 
-`release.yml` runs the same verification on version tags, packages the reusable libraries and browser distribution, creates checksums and attaches them to a GitHub Release. Tag naming is `vMAJOR.MINOR.PATCH` with an optional prerelease suffix.
+**Ctrl+S** commits the active editor and saves locally. Browser data belongs to the origin/profile; clearing site data or losing a profile may remove it. **Export a `.dspace` backup.** Data is not encrypted or uploaded to a cloud database by the storage adapter.
 
-GitHub Pages must be enabled with **GitHub Actions** as the deployment source. The workflow attempts automatic enablement, but an organization or repository policy can require an administrator to enable it first. Check the deployment job rather than assuming that a successful compile means the public site is live.
+IndexedDB saves compare and replace the expected version inside one transaction. A conflicting tab fails instead of silently overwriting another window; export its work before reloading. The previous committed browser generation is retained, but no recovery-management UI or automatic merge exists. Invalid stored documents are not silently replaced, failed validation preserves editor drafts, and edits made while saving remain dirty.
 
 ## License and attribution
 
-DataSpace source is MIT licensed. The project uses Uno Platform and SkiaSharp; their notices and the notices of their transitive dependencies remain applicable. No Microsoft Access source code, proprietary icons, database engine or Microsoft font files are bundled. Microsoft Access is a trademark of Microsoft. DataSpace is independent and is not affiliated with or endorsed by Microsoft.
+MIT licensed. Uno Platform, SkiaSharp and transitive dependency notices remain applicable. No Microsoft Access source, proprietary application icons or Microsoft font files are bundled. Microsoft Access is a Microsoft trademark; DataSpace is independent and not affiliated with or endorsed by Microsoft.

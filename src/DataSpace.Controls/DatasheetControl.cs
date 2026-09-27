@@ -5,7 +5,7 @@ namespace DataSpace.Controls;
 
 public sealed record CellEdit(string RecordId, string Field, string? Value);
 
-/// <summary>Reusable two-axis virtualized datasheet with range selection, keyboard navigation and native text editing.</summary>
+/// <summary>Two-axis virtualized datasheet; consumes lazy views without eagerly copying records.</summary>
 public sealed class DatasheetControl : UserControl, IDisposable
 {
     private readonly DatasheetRenderer _renderer = new();
@@ -55,15 +55,10 @@ public sealed class DatasheetControl : UserControl, IDisposable
         OfficeVisuals.Add(root, _viewport); OfficeVisuals.Add(root, _vertical, column: 1); OfficeVisuals.Add(root, _horizontal, row: 1);
         _horizontal.ValueChanged += (_, _) => { if (_editing && !FinishEdit(false)) return; ViewState.OffsetX = (float)_horizontal.Value; _surface.Invalidate(); };
         _vertical.ValueChanged += (_, _) => { if (_editing && !FinishEdit(false)) return; ViewState.OffsetY = (float)_vertical.Value; _surface.Invalidate(); };
-        Content = root;
-        _viewport.SizeChanged += (_, _) => UpdateScrollbars();
+        Content = root; _viewport.SizeChanged += (_, _) => UpdateScrollbars();
         _surface.PointerPressed += OnPressed; _surface.PointerMoved += OnMoved; _surface.PointerReleased += OnReleased;
         _surface.PointerCaptureLost += (_, _) => { _selecting = false; _selectionCaptured = false; _resizeColumn = -1; };
-        _surface.DoubleTapped += (_, e) =>
-        {
-            // Finish the second pointer dispatch before moving native text focus.
-            e.Handled = true; DispatcherQueue.TryEnqueue(() => { if (IsLoaded) BeginEdit(); });
-        };
+        _surface.DoubleTapped += (_, e) => { e.Handled = true; DispatcherQueue.TryEnqueue(() => { if (IsLoaded) BeginEdit(); }); };
         _surface.PointerWheelChanged += (_, e) =>
         {
             if (!FinishEdit(false)) return;
@@ -85,12 +80,12 @@ public sealed class DatasheetControl : UserControl, IDisposable
     {
         var selectedId = SelectedRecord?.Id;
         _fields = fields; _records = records; ViewState.ReadOnly = readOnly;
-        var index = selectedId is null ? -1 : records.ToList().FindIndex(r => r.Id == selectedId);
+        var index = selectedId is null ? -1 : RecordIdentity.IndexOf(records, selectedId);
         ViewState.SelectedRow = Math.Clamp(index >= 0 ? index : ViewState.SelectedRow, 0, Math.Max(0, records.Count - 1));
         ViewState.SelectedColumn = Math.Clamp(ViewState.SelectedColumn, 0, Math.Max(0, fields.Count - 1));
         ViewState.AnchorRow = Math.Clamp(ViewState.AnchorRow, 0, Math.Max(0, records.Count - 1));
         ViewState.AnchorColumn = Math.Clamp(ViewState.AnchorColumn, 0, Math.Max(0, fields.Count - 1));
-        UpdateScrollbars(); _surface.Invalidate(); SelectionChanged?.Invoke();
+        _renderer.InvalidateTotals(); UpdateScrollbars(); _surface.Invalidate(); SelectionChanged?.Invoke();
     }
     public Record? SelectedRecord => ViewState.SelectedRow >= 0 && ViewState.SelectedRow < _records.Count ? _records[ViewState.SelectedRow] : null;
     public FieldDefinition? SelectedField => ViewState.SelectedColumn >= 0 && ViewState.SelectedColumn < _fields.Count ? _fields[ViewState.SelectedColumn] : null;
@@ -99,8 +94,7 @@ public sealed class DatasheetControl : UserControl, IDisposable
     public void SelectCell(int row, int column, bool extend = false)
     {
         if (!FinishEdit(false)) return;
-        ViewState.SelectedRow = Math.Clamp(row, 0, Math.Max(0, _records.Count - 1));
-        ViewState.SelectedColumn = Math.Clamp(column, 0, Math.Max(0, _fields.Count - 1));
+        ViewState.SelectedRow = Math.Clamp(row, 0, Math.Max(0, _records.Count - 1)); ViewState.SelectedColumn = Math.Clamp(column, 0, Math.Max(0, _fields.Count - 1));
         if (!extend) { ViewState.AnchorRow = ViewState.SelectedRow; ViewState.AnchorColumn = ViewState.SelectedColumn; }
         EnsureVisible(); _surface.Invalidate(); SelectionChanged?.Invoke();
         if (SelectedRecord is { } record && SelectedField is { } field) AutomationProperties.SetName(this, $"{field.DisplayName}: {FieldValues.Display(field, record[field.Name])}. Record {ViewState.SelectedRow + 1} of {_records.Count}. F2 to edit.");
@@ -121,8 +115,6 @@ public sealed class DatasheetControl : UserControl, IDisposable
         {
             SelectCell(hit.Row, hit.Column < 0 ? 0 : hit.Column, OfficeVisuals.ShiftDown);
             if (hit.Kind == GridHitKind.RowHeader) { ViewState.AnchorColumn = 0; ViewState.SelectedColumn = Math.Max(0, _fields.Count - 1); _surface.Invalidate(); }
-            // Capturing/releasing every click terminates Uno's pending double-tap.
-            // Capture only when pointer motion crosses the drag threshold.
             _selecting = true; _selectionCaptured = false; _selectionOrigin = point.Position;
         }
         e.Handled = true;
@@ -132,8 +124,7 @@ public sealed class DatasheetControl : UserControl, IDisposable
         var point = e.GetCurrentPoint(_surface); var position = point.Position;
         if (_resizeColumn >= 0)
         {
-            _fields[_resizeColumn].Width = Math.Clamp(_originalWidth + (position.X - _resizeStart) / ViewState.Zoom, 40, 2000);
-            UpdateScrollbars(); _surface.Invalidate(); e.Handled = true;
+            _fields[_resizeColumn].Width = Math.Clamp(_originalWidth + (position.X - _resizeStart) / ViewState.Zoom, 40, 2000); UpdateScrollbars(); _surface.Invalidate(); e.Handled = true;
         }
         else if (_selecting)
         {
@@ -155,17 +146,13 @@ public sealed class DatasheetControl : UserControl, IDisposable
             var field = _fields[_resizeColumn]; var width = field.Width;
             field.Width = _originalWidth; _resizeColumn = -1; ColumnWidthChanged?.Invoke(field.Name, width);
         }
-        _selecting = false; _selectionCaptured = false;
-        if (captured) _surface.ReleasePointerCapture(e.Pointer);
+        _selecting = false; _selectionCaptured = false; if (captured) _surface.ReleasePointerCapture(e.Pointer);
     }
     public void BeginEdit(string? initialText = null)
     {
         if (ViewState.ReadOnly || SelectedRecord is not { } record || SelectedField is not { } field || field.Type == FieldType.AutoNumber) return;
         if (field.Type == FieldType.YesNo)
-        {
-            var value = FieldValues.Parse(field, record[field.Name]) is not true;
-            CommitEdits?.Invoke([new(record.Id, field.Name, value.ToString())]); return;
-        }
+        { var value = FieldValues.Parse(field, record[field.Name]) is not true; CommitEdits?.Invoke([new(record.Id, field.Name, value.ToString())]); return; }
         EnsureVisible(); var bounds = _renderer.CellBounds(_fields, ViewState.SelectedRow, ViewState.SelectedColumn, ViewState);
         _editingRecord = record.Id; _editingField = field.Name; _editing = true;
         _editor.Margin = new(bounds.Left * ViewState.Zoom, bounds.Top * ViewState.Zoom, 0, 0);
@@ -176,12 +163,11 @@ public sealed class DatasheetControl : UserControl, IDisposable
     }
     public bool FinishEdit(bool focus = true)
     {
-        if (!_editing || _committing) return true;
-        _committing = true;
+        if (!_editing || _committing) return true; _committing = true;
         try
         {
-            var record = _records.FirstOrDefault(r => r.Id == _editingRecord);
-            var value = _editor.Text;
+            var index = _editingRecord is null ? -1 : RecordIdentity.IndexOf(_records, _editingRecord);
+            var record = index < 0 ? null : _records[index]; var value = _editor.Text;
             if (record is not null && _editingField is { } field && value != (record[field] ?? "") && CommitEdits?.Invoke([new(record.Id, field, value)]) == false) return false;
             _editing = false; _editor.Visibility = Visibility.Collapsed;
             if (focus) Focus(FocusState.Programmatic); return true;
@@ -192,7 +178,7 @@ public sealed class DatasheetControl : UserControl, IDisposable
     public IReadOnlyList<string> SelectedRecordIds()
     {
         var first = Math.Max(0, Math.Min(ViewState.AnchorRow, ViewState.SelectedRow)); var last = Math.Min(_records.Count - 1, Math.Max(ViewState.AnchorRow, ViewState.SelectedRow));
-        return _records.Skip(first).Take(Math.Max(0, last - first + 1)).Select(r => r.Id).ToArray();
+        var ids = new string[Math.Max(0, last - first + 1)]; for (var i = 0; i < ids.Length; i++) ids[i] = _records[first + i].Id; return ids;
     }
     public void SelectAll()
     { ViewState.AnchorRow = 0; ViewState.AnchorColumn = 0; ViewState.SelectedRow = Math.Max(0, _records.Count - 1); ViewState.SelectedColumn = Math.Max(0, _fields.Count - 1); _surface.Invalidate(); SelectionChanged?.Invoke(); }
@@ -204,7 +190,8 @@ public sealed class DatasheetControl : UserControl, IDisposable
             var firstColumn = Math.Min(ViewState.AnchorColumn, ViewState.SelectedColumn); var lastColumn = Math.Max(ViewState.AnchorColumn, ViewState.SelectedColumn);
             var fields = _fields.Skip(firstColumn).Take(lastColumn - firstColumn + 1).ToArray();
             var firstRow = Math.Min(ViewState.AnchorRow, ViewState.SelectedRow); var lastRow = Math.Max(ViewState.AnchorRow, ViewState.SelectedRow);
-            var data = new DataPackage(); data.SetText(CsvCodec.Export(fields, _records.Skip(firstRow).Take(lastRow - firstRow + 1), new() { Delimiter = '\t', HasHeaders = false })); Clipboard.SetContent(data);
+            IEnumerable<Record> Rows() { for (var row = firstRow; row <= lastRow; row++) yield return _records[row]; }
+            var data = new DataPackage(); data.SetText(CsvCodec.Export(fields, Rows(), new() { Delimiter = '\t', HasHeaders = false })); Clipboard.SetContent(data);
         }
         catch (Exception error) { Error?.Invoke("Clipboard copy failed: " + error.Message); }
         return Task.CompletedTask;
@@ -217,13 +204,12 @@ public sealed class DatasheetControl : UserControl, IDisposable
             var content = Clipboard.GetContent(); if (!content.Contains(StandardDataFormats.Text)) return;
             var rows = CsvCodec.Parse(await content.GetTextAsync(), new() { Delimiter = '\t', HasHeaders = false, MaximumRecords = 10000 });
             var edits = new List<CellEdit>(); var startRow = Math.Min(ViewState.SelectedRow, ViewState.AnchorRow); var startColumn = Math.Min(ViewState.SelectedColumn, ViewState.AnchorColumn);
-            for (var row = 0; row < rows.Count; row++)
-                for (var column = 0; column < rows[row].Count; column++)
-                {
-                    if (startRow + row >= _records.Count || startColumn + column >= _fields.Count) throw new DataSpaceException("The pasted range extends beyond existing records or fields. Add records first.");
-                    var field = _fields[startColumn + column]; if (field.Type == FieldType.AutoNumber) throw new DataSpaceException("AutoNumber cells cannot be pasted over.");
-                    edits.Add(new(_records[startRow + row].Id, field.Name, rows[row][column]));
-                }
+            for (var row = 0; row < rows.Count; row++) for (var column = 0; column < rows[row].Count; column++)
+            {
+                if (startRow + row >= _records.Count || startColumn + column >= _fields.Count) throw new DataSpaceException("The pasted range extends beyond existing records or fields. Add records first.");
+                var field = _fields[startColumn + column]; if (field.Type == FieldType.AutoNumber) throw new DataSpaceException("AutoNumber cells cannot be pasted over.");
+                edits.Add(new(_records[startRow + row].Id, field.Name, rows[row][column]));
+            }
             CommitEdits?.Invoke(edits);
         }
         catch (Exception error) { Error?.Invoke(error.Message); }
@@ -237,18 +223,14 @@ public sealed class DatasheetControl : UserControl, IDisposable
             else if (e.Key == VirtualKey.V) { await PasteAsync(); e.Handled = true; }
             else if (e.Key == VirtualKey.A) { SelectAll(); e.Handled = true; }
             else if (e.Key == VirtualKey.Home) { SelectCell(0, 0); e.Handled = true; }
-            else if (e.Key == VirtualKey.End) { SelectCell(_records.Count - 1, _fields.Count - 1); e.Handled = true; }
-            return;
+            else if (e.Key == VirtualKey.End) { SelectCell(_records.Count - 1, _fields.Count - 1); e.Handled = true; } return;
         }
         var extend = OfficeVisuals.ShiftDown;
         switch (e.Key)
         {
-            case VirtualKey.Up: Move(-1, 0, extend); break;
-            case VirtualKey.Down: Move(1, 0, extend); break;
-            case VirtualKey.Left: Move(0, -1, extend); break;
-            case VirtualKey.Right: Move(0, 1, extend); break;
-            case VirtualKey.Home: SelectCell(ViewState.SelectedRow, 0, extend); break;
-            case VirtualKey.End: SelectCell(ViewState.SelectedRow, _fields.Count - 1, extend); break;
+            case VirtualKey.Up: Move(-1, 0, extend); break; case VirtualKey.Down: Move(1, 0, extend); break;
+            case VirtualKey.Left: Move(0, -1, extend); break; case VirtualKey.Right: Move(0, 1, extend); break;
+            case VirtualKey.Home: SelectCell(ViewState.SelectedRow, 0, extend); break; case VirtualKey.End: SelectCell(ViewState.SelectedRow, _fields.Count - 1, extend); break;
             case VirtualKey.PageUp: Move(-(int)(_viewport.ActualHeight / (27 * ViewState.Zoom)), 0, extend); break;
             case VirtualKey.PageDown: Move((int)(_viewport.ActualHeight / (27 * ViewState.Zoom)), 0, extend); break;
             case VirtualKey.F2: case VirtualKey.Enter: BeginEdit(); break;

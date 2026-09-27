@@ -13,6 +13,7 @@ public sealed class NavigationPane : UserControl
     private readonly TextBox _search = OfficeVisuals.Input(placeholder: "Search...");
     private IReadOnlyList<DatabaseObjectItem> _objects = [];
     private readonly HashSet<DatabaseObjectKind> _collapsed = [];
+    private readonly Dictionary<string, Button> _buttons = new(StringComparer.Ordinal);
     private string? _selected;
     public event Action<DatabaseObjectItem, bool>? ObjectOpened;
     public event Action<DatabaseObjectItem, string>? ObjectCommand;
@@ -31,18 +32,30 @@ public sealed class NavigationPane : UserControl
     }
     public void SetObjects(DatabaseDocument document)
     {
-        _objects = document.Tables.Select(t => new DatabaseObjectItem(DatabaseObjectKind.Table, t.Name))
+        var objects = document.Tables.Select(t => new DatabaseObjectItem(DatabaseObjectKind.Table, t.Name))
             .Concat(document.Queries.Select(q => new DatabaseObjectItem(DatabaseObjectKind.Query, q.Name)))
             .Concat(document.Forms.Select(f => new DatabaseObjectItem(DatabaseObjectKind.Form, f.Name)))
             .Concat(document.Reports.Select(r => new DatabaseObjectItem(DatabaseObjectKind.Report, r.Name)))
-            .Concat(document.Macros.Select(m => new DatabaseObjectItem(DatabaseObjectKind.Macro, m.Name))).ToList();
-        Build();
+            .Concat(document.Macros.Select(m => new DatabaseObjectItem(DatabaseObjectKind.Macro, m.Name))).ToArray();
+        if (_objects.SequenceEqual(objects)) return;
+        _objects = objects; Build();
     }
-    public void Select(DatabaseObjectItem? item) { _selected = item?.Key; Build(); }
+    public void Select(DatabaseObjectItem? item)
+    {
+        if (_selected == item?.Key) return;
+        var old = _selected; _selected = item?.Key;
+        if (old is not null && _buttons.TryGetValue(old, out var previous)) Style(previous, false);
+        if (_selected is not null && _buttons.TryGetValue(_selected, out var current)) Style(current, true);
+    }
+    private static void Style(Button button, bool selected)
+    {
+        button.Background = OfficeVisuals.Brush(selected ? "F5DFB4" : "00000000");
+        button.BorderBrush = OfficeVisuals.Brush(selected ? "E8BC69" : "00000000");
+    }
     public void FocusSearch() => _search.Focus(FocusState.Programmatic);
     private void Build()
     {
-        _items.Children.Clear();
+        _items.Children.Clear(); _buttons.Clear();
         foreach (var kind in new[] { DatabaseObjectKind.Table, DatabaseObjectKind.Query, DatabaseObjectKind.Form, DatabaseObjectKind.Report, DatabaseObjectKind.Macro })
         {
             var matches = _objects.Where(o => o.Kind == kind && o.Name.Contains(_search.Text, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -54,9 +67,9 @@ public sealed class NavigationPane : UserControl
             if (_collapsed.Contains(kind) && _search.Text.Length == 0) continue;
             foreach (var item in matches)
             {
-                var button = OfficeVisuals.Button(item.Name, () => { _selected = item.Key; ObjectOpened?.Invoke(item, false); Build(); }, item.Icon, "Object_" + item.Key);
+                var button = OfficeVisuals.Button(item.Name, () => ObjectOpened?.Invoke(item, false), item.Icon, "Object_" + item.Key);
                 button.HorizontalAlignment = HorizontalAlignment.Stretch; button.HorizontalContentAlignment = HorizontalAlignment.Left; button.Height = 30; button.Margin = new(5, 0, 5, 1); button.Padding = new(9, 4, 6, 4);
-                if (item.Key == _selected) { button.Background = OfficeVisuals.Brush("F5DFB4"); button.BorderBrush = OfficeVisuals.Brush("E8BC69"); }
+                Style(button, item.Key == _selected); _buttons[item.Key] = button;
                 var menu = new MenuFlyout();
                 foreach (var command in new[] { "Open", "Design View", "Rename", "Delete" })
                 {
