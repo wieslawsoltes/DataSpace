@@ -45,8 +45,9 @@ jobs:
         run: python3 scripts/stage-site.py
       - name: Verify all reusable libraries can be packaged
         run: |
+          set -euo pipefail
           for project in Core Query Storage Rendering Controls; do
-            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release --no-build -o artifacts/packages
+            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -o artifacts/packages
           done
           test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
       - uses: actions/upload-artifact@v4
