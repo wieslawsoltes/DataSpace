@@ -5,6 +5,7 @@ namespace DataSpace.Query;
 
 public sealed class QueryStatistics
 {
+    public long SourceContextsCreated { get; internal set; }
     public long SourceRowsRead { get; internal set; }
     public long JoinComparisons { get; internal set; }
     public int HashJoins { get; internal set; }
@@ -32,6 +33,7 @@ public sealed class QueryOptions
     public int MaximumIntermediateRows { get; init; } = 250000;
     public int MaximumResultRows { get; init; } = 100000;
     public int MaximumSourceDepth { get; init; } = 32;
+    public bool EnableReusableRowContexts { get; init; } = true;
     public bool EnableStreamingAggregates { get; init; } = true;
     public bool EnableTopKSort { get; init; } = true;
     public int MaximumCrosstabColumns { get; init; } = 256;

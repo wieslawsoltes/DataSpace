@@ -27,15 +27,6 @@ public sealed partial class QueryEngine
         }
         finally { path.Remove(query.Name); }
     }
-    private IEnumerable<EvaluationContext> SourceRows(TableDefinition table, string alias, IReadOnlyDictionary<string, object?> parameters, CancellationToken token, QueryStatistics statistics)
-    {
-        var count = 0;
-        foreach (var record in table.Records)
-        {
-            token.ThrowIfCancellationRequested(); CheckSize(++count); statistics.SourceRowsRead++;
-            yield return AddSource(new EvaluationContext { Parameters = parameters }, table, alias, record);
-        }
-    }
     private QueryResult ExecuteSelect(DatabaseDocument document, SelectStatement plan, IReadOnlyDictionary<string, object?> parameters,
         CancellationToken token, HashSet<string> path, QueryStatistics statistics)
     {
@@ -58,12 +49,13 @@ public sealed partial class QueryEngine
         var aliases = schema.Clone(); foreach (var name in names) { aliases.Values[name] = null; aliases.Ambiguous.Remove(name); }
         if (plan.Having is { } h) Bind(h, aliases);
         foreach (var order in plan.Order) Bind(order.Expression, aliases);
+        var grouped = plan.Groups.Count > 0 || projections.Any(p => p.Expression.Aggregate) || plan.Having?.Aggregate == true;
+        var reuse = Options.EnableReusableRowContexts && plan.Joins.Count == 0 && (!grouped || Options.EnableStreamingAggregates);
         IEnumerable<EvaluationContext> rows = plan.Source is null ? [new EvaluationContext { Parameters = parameters }]
-            : SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics);
+            : SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics, reuse);
         for (var index = 0; index < plan.Joins.Count; index++)
             rows = JoinRows(rows, plan.Joins[index], sources[index + 1].Table, sources.Take(index + 1).ToList(), parameters, token, statistics);
         if (plan.Where is { } where) rows = rows.Where(row => { token.ThrowIfCancellationRequested(); return SqlValue.Truth(where.Eval(row)); });
-        var grouped = plan.Groups.Count > 0 || projections.Any(p => p.Expression.Aggregate) || plan.Having?.Aggregate == true;
         if (grouped)
         {
             if (projections.Any(p => !p.Expression.GroupSafe(plan.Groups))) throw new DataSpaceException("Every selected field must be grouped or aggregated.");

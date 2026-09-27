@@ -58,7 +58,7 @@ public sealed partial class QueryEngine
                 if (heading.Aggregate) throw new DataSpaceException("Fixed headings must be scalar values or parameters.");
                 AddColumn(heading.Eval(new EvaluationContext { Parameters = parameters }));
             }
-        IEnumerable<EvaluationContext> rows = SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics);
+        IEnumerable<EvaluationContext> rows = SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics, Options.EnableReusableRowContexts && plan.Joins.Count == 0);
         for (var i = 0; i < plan.Joins.Count; i++) rows = JoinRows(rows, plan.Joins[i], sources[i + 1].Table, sources.Take(i + 1).ToList(), parameters, token, statistics);
         var groups = new Dictionary<string, PivotGroup>(StringComparer.Ordinal); long cells = 0;
         foreach (var row in rows)

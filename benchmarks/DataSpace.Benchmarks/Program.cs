@@ -52,11 +52,31 @@ const string sql = "SELECT a.ID FROM Table1 a INNER JOIN Table2 b ON a.ID=b.ID";
 var fast = hash.Select(joins, sql); var slow = nested.Select(joins, sql);
 if (!fast.Records.Select(r => r["ID"]).SequenceEqual(slow.Records.Select(r => r["ID"]))) throw new Exception("Differential join mismatch.");
 Pair("Equality join / 1,000 by 1,000 records", "Reference nested loop", () => nested.Select(joins, sql), "Hash candidate lookup", () => hash.Select(joins, sql), 3);
+var analytics = new DatabaseDocument();
+var entries = new TableDefinition { Name = "Entries", Fields = [new() { Name = "ID", Type = FieldType.Integer }, new() { Name = "Category", Type = FieldType.Integer }, new() { Name = "Amount", Type = FieldType.Decimal }] };
+for (var i = 0; i < 50000; i++) RecordOperations.Insert(entries, new Dictionary<string, string?> { ["ID"] = i.ToString(), ["Category"] = (i % 32).ToString(), ["Amount"] = ((i * 3571L) % 7919).ToString() });
+analytics.Tables.Add(entries); SchemaValidator.Validate(analytics);
+var streamed = new QueryEngine();
+var buffered = new QueryEngine(new() { EnableStreamingAggregates = false, EnableTopKSort = false, EnableReusableRowContexts = false });
+const string aggregateSql = "SELECT Category, Sum(Amount) AS Total, Avg(Amount) AS Mean, Count(*) AS N, Min(Amount) AS Low, Max(Amount) AS High FROM Entries GROUP BY Category ORDER BY Total DESC";
+const string topSql = "SELECT TOP 20 ID, Amount FROM Entries ORDER BY Amount DESC, ID";
+void SameRows(QueryResult a, QueryResult b)
+{
+    if (a.Records.Count != b.Records.Count || !a.Fields.Select(f => f.Name).SequenceEqual(b.Fields.Select(f => f.Name))) throw new Exception("Analytics schema/count mismatch.");
+    for (var i = 0; i < a.Records.Count; i++)
+        if (!a.Fields.Select(f => a.Records[i][f.Name]).SequenceEqual(b.Fields.Select(f => b.Records[i][f.Name]))) throw new Exception("Analytics differential result mismatch.");
+}
+var aggregateFast = streamed.Select(analytics, aggregateSql); var aggregateSlow = buffered.Select(analytics, aggregateSql); SameRows(aggregateFast, aggregateSlow);
+var topFast = streamed.Select(analytics, topSql); var topSlow = buffered.Select(analytics, topSql); SameRows(topFast, topSlow);
+Pair("Grouped analytics / 50,000 records / 32 groups", "Buffered contexts and repeated aggregate scans", () => buffered.Select(analytics, aggregateSql), "Reusable scalar context and streaming accumulators", () => streamed.Select(analytics, aggregateSql));
+Pair("Ordered TOP 20 / 50,000 records", "Distinct source contexts and full stable sort", () => buffered.Select(analytics, topSql), "Reusable scalar context and bounded stable selection", () => streamed.Select(analytics, topSql));
 var output = new
 {
     runtime = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
     processorCount = Environment.ProcessorCount, configuration = "Release", measuredAtUtc = DateTime.UtcNow,
     scope = "Managed engine microbenchmarks, not browser or hardware-GPU measurements; no storage I/O. Timings are environment-dependent.",
+    aggregation = new { referenceRowsBuffered = aggregateSlow.Statistics.BufferedAggregateRows, optimizedGroupsRetained = aggregateFast.Statistics.PeakAggregateGroups, optimizedRowsBuffered = aggregateFast.Statistics.BufferedAggregateRows },
+    orderedTop = new { candidates = topFast.Statistics.SortCandidateRows, referencePeakRows = topSlow.Statistics.PeakSortRows, optimizedPeakRows = topFast.Statistics.PeakSortRows },
     joins = new { rows = fast.Records.Count, hashComparisons = fast.Statistics.JoinComparisons, referenceComparisons = slow.Statistics.JoinComparisons }, results
 };
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);

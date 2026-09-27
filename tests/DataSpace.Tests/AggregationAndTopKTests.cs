@@ -32,14 +32,14 @@ public sealed class AggregationAndTopKTests
     public void StreamingAggregatesMatchBufferedReference(string sql)
     {
         var document = Fixture();
-        var expected = new QueryEngine(new() { EnableStreamingAggregates = false }).Select(document, sql);
+        var expected = new QueryEngine(new() { EnableStreamingAggregates = false, EnableReusableRowContexts = false }).Select(document, sql);
         var actual = new QueryEngine().Select(document, sql); Equal(expected, actual);
         Assert.Equal(0, actual.Statistics.BufferedAggregateRows); Assert.InRange(actual.Statistics.PeakAggregateGroups, 0, 7);
     }
     [Theory]
     [InlineData("SELECT TOP 7 ID,Value FROM Items ORDER BY Value DESC, ID")]
     [InlineData("SELECT ID, Value AS V FROM Items ORDER BY V, ID DESC LIMIT 13 OFFSET 9")]
-    [InlineData("SELECT TOP 5 DISTINCT Value FROM Items ORDER BY Value")]
+    [InlineData("SELECT DISTINCT TOP 5 Value FROM Items ORDER BY Value")]
     [InlineData("SELECT TOP 3 Category, Sum(Value) AS S FROM Items GROUP BY Category ORDER BY S DESC")]
     [InlineData("SELECT TOP 0 ID FROM Items ORDER BY ID")]
     [InlineData("SELECT ID,Value FROM Items ORDER BY 2,1 DESC LIMIT 5 OFFSET 10000")]
@@ -47,7 +47,7 @@ public sealed class AggregationAndTopKTests
     public void TopKMatchesStableFullSort(string sql)
     {
         var document = Fixture();
-        var expected = new QueryEngine(new() { EnableTopKSort = false }).Select(document, sql);
+        var expected = new QueryEngine(new() { EnableTopKSort = false, EnableReusableRowContexts = false }).Select(document, sql);
         var actual = new QueryEngine().Select(document, sql); Equal(expected, actual);
         Assert.InRange(actual.Statistics.PeakSortRows, 0, expected.Statistics.PeakSortRows);
     }
@@ -55,12 +55,12 @@ public sealed class AggregationAndTopKTests
     public void TopKBufferIsBoundedByLimitPlusOffset()
     {
         var result = new QueryEngine().Select(Fixture(10000), "SELECT ID, Value FROM Items ORDER BY Value DESC LIMIT 10 OFFSET 20");
-        Assert.Equal(10000, result.Statistics.SortCandidateRows); Assert.Equal(30, result.Statistics.PeakSortRows); Assert.Equal(10, result.Records.Count);
+        Assert.Equal(1, result.Statistics.SourceContextsCreated); Assert.Equal(10000, result.Statistics.SortCandidateRows); Assert.Equal(30, result.Statistics.PeakSortRows); Assert.Equal(10, result.Records.Count);
     }
     [Fact]
     public void RandomizedPlansMatchReferencePaths()
     {
-        var document = Fixture(321); var fast = new QueryEngine(); var reference = new QueryEngine(new() { EnableTopKSort = false, EnableStreamingAggregates = false });
+        var document = Fixture(321); var fast = new QueryEngine(); var reference = new QueryEngine(new() { EnableTopKSort = false, EnableStreamingAggregates = false, EnableReusableRowContexts = false });
         var random = new Random(6921);
         for (var i = 0; i < 60; i++)
         {
