@@ -10,7 +10,11 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     private readonly NavigationPane _navigation = new();
     private readonly DocumentTabStrip _tabs = new();
     private readonly RecordNavigator _navigator = new();
-    private readonly ContentControl _content = new();
+    private readonly ContentControl _content = new()
+    {
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        VerticalContentAlignment = VerticalAlignment.Stretch
+    };
     private readonly TextBlock _title = OfficeVisuals.Text("DataSpace", 13, "FFFFFF");
     private readonly TextBlock _status = OfficeVisuals.Text("Ready", 11, "555555");
     private readonly TextBlock _error = OfficeVisuals.Text("", 12, "9C252A");
@@ -36,6 +40,8 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     public DatabaseWorkspaceView(DatabaseWorkspace workspace)
     {
         Workspace = workspace;
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        VerticalContentAlignment = VerticalAlignment.Stretch;
         var root = OfficeVisuals.Grid("36,Auto,Auto,*,25"); root.Background = OfficeVisuals.Brush("FFFFFF");
         var titlebar = OfficeVisuals.Grid("*", "180,*,190"); titlebar.Background = OfficeVisuals.Brush("A4373A");
         OfficeVisuals.Add(titlebar, OfficeVisuals.Row(OfficeVisuals.Text("  DataSpace", 14, "FFFFFF", true), Quick("▣", "Save", "save"), Quick("↶", "Undo", "undo"), Quick("↷", "Redo", "redo")));
@@ -152,7 +158,6 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     private void RefreshTable()
     {
         if (_sheet is null || _active?.Kind != DatabaseObjectKind.Table) return;
-        // TableView preserves identity through sort/filter and returns detached rows/column metadata.
         var result = TableView.Select(Workspace.Document, _active.Name, _filter, _sortField, _descending, _search);
         _sheet.ViewState.SortField = _sortField; _sheet.ViewState.SortDescending = _descending;
         _sheet.SetData(result.Fields, result.Records); _navigator.Update(_sheet.ViewState.SelectedRow, result.Records.Count, _filter.Length > 0 || _search.Length > 0);
