@@ -79,7 +79,7 @@ public sealed partial class QueryEngine
         var selected = new List<(object?[] Values, object?[] Order, int Ordinal)>();
         var seen = new HashSet<string>(StringComparer.Ordinal); var skipped = 0; var ordinal = 0;
         var sorting = plan.Order.Count > 0;
-        // Without ordering, stop as soon as TOP/LIMIT is satisfied. Unseen source rows are not cloned or parsed.
+        // Without ordering, stop once TOP/LIMIT is satisfied; do not clone unseen rows.
         if (plan.Limit != 0)
         foreach (var row in rows)
         {
@@ -232,60 +232,5 @@ public sealed partial class QueryEngine
             }
         }
         return value switch { long or int => FieldType.Integer, decimal or double => FieldType.Decimal, DateTime => FieldType.DateTime, bool => FieldType.YesNo, Guid => FieldType.Guid, _ => FieldType.LongText };
-    }
-    private QueryResult ExecuteUnion(DatabaseDocument document, UnionStatement union, IReadOnlyDictionary<string, object?> parameters,
-        CancellationToken token, HashSet<string> path, QueryStatistics statistics)
-    {
-        var branches = new List<QueryResult>(); var count = 0;
-        foreach (var query in union.Queries)
-        {
-            token.ThrowIfCancellationRequested(); var result = ExecuteSelect(document, query, parameters, token, path, statistics);
-            if (branches.Count > 0 && result.Fields.Count != branches[0].Fields.Count) throw new DataSpaceException("UNION branches must have the same number of columns.");
-            count = checked(count + result.Records.Count); CheckSize(count); branches.Add(result);
-        }
-        var fields = branches[0].Fields.Select(TableSchemaDraft.Copy).ToList();
-        for (var column = 0; column < fields.Count; column++)
-        {
-            var types = branches.Select(b => b.Fields[column].Type).Distinct().ToArray();
-            if (types.Length > 1) fields[column].Type = types.All(t => ComparisonFamily(t) == 0) ? FieldType.Decimal : FieldType.LongText;
-        }
-        var rows = new List<Record>();
-        for (var branch = 0; branch < branches.Count; branch++)
-        {
-            var result = branches[branch];
-            foreach (var row in result.Records)
-            {
-                token.ThrowIfCancellationRequested(); var record = new Record();
-                for (var column = 0; column < fields.Count; column++)
-                    record[fields[column].Name] = FieldValues.Normalize(fields[column], row[result.Fields[column].Name]);
-                rows.Add(record);
-            }
-            if (branch > 0 && !union.All[branch - 1])
-            {
-                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                rows = rows.Where(row => seen.Add(FieldValues.Key(fields.Select(f => row[f.Name])))).ToList();
-            }
-        }
-        if (rows.Count > Options.MaximumResultRows) throw new DataSpaceException("UNION result-row limit exceeded.");
-        if (union.Order.Count > 0)
-        {
-            var schema = new EvaluationContext { Parameters = parameters }; foreach (var field in fields) schema.Values[field.Name] = null;
-            foreach (var order in union.Order) foreach (var name in ExpressionAnalysis.Names(order.Expression)) schema.Resolve(name.Name, name.Parameter);
-            var decorated = rows.Select((row, ordinal) =>
-            {
-                var context = new EvaluationContext { Parameters = parameters };
-                foreach (var field in fields) context.Values[field.Name] = FieldValues.Parse(field, row[field.Name]);
-                return (Row: row, Ordinal: ordinal, Keys: union.Order.Select(o => o.Expression is LiteralExpr { Value: decimal n } && n == decimal.Truncate(n) && n > 0 && n <= fields.Count
-                    ? context.Values[fields[(int)n - 1].Name] : o.Expression.Eval(context)).ToArray());
-            }).ToList();
-            decorated.Sort((a, b) =>
-            {
-                token.ThrowIfCancellationRequested();
-                for (var i = 0; i < union.Order.Count; i++) { var compare = SqlValue.Compare(a.Keys[i], b.Keys[i]); if (compare != 0) return union.Order[i].Descending ? -Math.Sign(compare) : compare; }
-                return a.Ordinal.CompareTo(b.Ordinal);
-            });
-            rows = decorated.Select(r => r.Row).ToList();
-        }
-        return new() { Fields = fields, Records = rows };
     }
 }

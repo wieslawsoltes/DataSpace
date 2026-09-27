@@ -31,7 +31,6 @@ public static class FieldValues
             throw new DataSpaceException($"'{value}' is not a valid {field.Type} value for '{field.Name}'.");
         }
     }
-
     public static string? Normalize(FieldDefinition field, string? value)
     {
         var typed = Parse(field, value);
@@ -48,10 +47,15 @@ public static class FieldValues
             return text;
         }
         if (typed is DateTime date) return date.ToString("O", Culture);
-        if (typed is decimal number && field.Type == FieldType.Currency) return decimal.Round(number, 4).ToString(Culture);
+        if (typed is decimal number)
+        {
+            if (field.Type == FieldType.Currency) number = decimal.Round(number, 4);
+            // Equal decimal values must have equal persistent keys regardless of scale.
+            // Fixed notation also round-trips tiny values through NumberStyles.Number.
+            return number.ToString("0.############################", Culture);
+        }
         return Convert.ToString(typed, Culture);
     }
-
     public static string Display(FieldDefinition field, string? value)
     {
         var typed = Parse(field, value);
@@ -66,13 +70,11 @@ public static class FieldValues
         }
         catch (FormatException) { return value ?? ""; }
     }
-
     public static string? FromObject(object? value) => value switch
     {
         null => null,
         DateTime date => date.ToString("O", Culture),
         _ => Convert.ToString(value, Culture)
     };
-
     public static string Key(IEnumerable<string?> values) => string.Concat(values.Select(v => v is null ? "-1:" : v.Length + ":" + v));
 }
