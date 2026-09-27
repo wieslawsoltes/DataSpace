@@ -29,6 +29,13 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Test database, query and storage libraries
         run: dotnet test tests/DataSpace.Tests/DataSpace.Tests.csproj -c Release --logger 'trx;LogFileName=tests.trx'
+      - name: Measure reproducible engine scenarios
+        run: dotnet run --project benchmarks/DataSpace.Benchmarks/DataSpace.Benchmarks.csproj -c Release -- artifacts/performance.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: artifacts/performance.json
+          if-no-files-found: error
       - name: Compile reusable renderers
         run: dotnet build src/DataSpace.Rendering/DataSpace.Rendering.csproj -c Release
       - uses: actions/upload-artifact@v4
@@ -84,7 +91,7 @@ jobs:
           for retry in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/DataSpace/storage-test.html > /dev/null && break || sleep 1; done
           node scripts/browser-smoke.mjs 2>&1 | tee artifacts/logs/browser-tests.log
           mkdir -p artifacts/site/qa
-          cp artifacts/qa/workspace.png artifacts/site/qa/workspace.png
+          cp artifacts/qa/*.png artifacts/site/qa/
       - name: Verify all reusable libraries can be packaged
         id: packages
         if: ${{ !cancelled() && steps.publish.outcome == 'success' }}

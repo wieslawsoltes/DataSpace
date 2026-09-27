@@ -3,6 +3,8 @@ namespace DataSpace.Controls;
 public sealed class DocumentTabStrip : UserControl
 {
     private readonly StackPanel _panel = new() { Orientation = Orientation.Horizontal, Spacing = 0 };
+    private DatabaseObjectItem[] _documents = [];
+    private string? _selected;
     public event Action<DatabaseObjectItem>? Selected;
     public event Action<DatabaseObjectItem>? Closed;
     public DocumentTabStrip()
@@ -12,8 +14,9 @@ public sealed class DocumentTabStrip : UserControl
     }
     public void SetDocuments(IReadOnlyList<DatabaseObjectItem> documents, string? selectedKey)
     {
-        _panel.Children.Clear();
-        foreach (var document in documents)
+        if (_selected == selectedKey && _documents.SequenceEqual(documents)) return;
+        _documents = documents.ToArray(); _selected = selectedKey; _panel.Children.Clear();
+        foreach (var document in _documents)
         {
             var selected = document.Key == selectedKey;
             var tab = OfficeVisuals.Grid("*", "*,25"); tab.MinWidth = 130; tab.Height = 32;

@@ -21,12 +21,14 @@ public sealed class DatasheetViewState
     public float Zoom { get; set; } = 1;
 }
 
-/// <summary>Viewport-only rendering and deterministic hit testing; does not create a visual per record.</summary>
+/// <summary>Viewport-only rendering, snapshot-cached totals and deterministic hit testing.</summary>
 public sealed class DatasheetRenderer : IDisposable
 {
     public OfficeTheme Theme { get; }
     private readonly DrawingResources _drawing;
+    private readonly TableTotalsCache _totals = new();
     public DatasheetRenderer(OfficeTheme? theme = null) { Theme = theme ?? OfficeTheme.Default; _drawing = new(Theme); }
+    public void InvalidateTotals() => _totals.Invalidate();
     public float ContentWidth(IReadOnlyList<FieldDefinition> fields) => Theme.RowHeaderWidth + fields.Sum(f => (float)f.Width);
     public float ContentHeight(int records, DatasheetViewState state) => Theme.ColumnHeaderHeight + (records + (state.ShowNewRecord && !state.ReadOnly ? 1 : 0)) * Theme.RowHeight;
     public SKRect CellBounds(IReadOnlyList<FieldDefinition> fields, int row, int column, DatasheetViewState state)
@@ -70,25 +72,25 @@ public sealed class DatasheetRenderer : IDisposable
             var y = Theme.ColumnHeaderHeight + row * Theme.RowHeight - state.OffsetY;
             if (row % 2 != 0) _drawing.Fill(canvas, new(Theme.RowHeaderWidth, y, width, y + Theme.RowHeight), Theme.AlternateRow);
             var x = Theme.RowHeaderWidth - state.OffsetX;
+            var record = row < records.Count ? records[row] : null;
             for (var column = 0; column < fields.Count; column++)
             {
                 var field = fields[column]; var rect = new SKRect(x, y, x + (float)field.Width, y + Theme.RowHeight); x = rect.Right;
                 if (rect.Right < Theme.RowHeaderWidth || rect.Left > width) continue;
-                var selected = row >= minRow && row <= maxRow && column >= minColumn && column <= maxColumn;
-                if (selected) _drawing.Fill(canvas, rect, Theme.Selection);
+                if (row >= minRow && row <= maxRow && column >= minColumn && column <= maxColumn) _drawing.Fill(canvas, rect, Theme.Selection);
                 _drawing.Line(canvas, rect.Right - .5f, y, rect.Right - .5f, rect.Bottom, Theme.GridLine);
-                if (row < records.Count)
+                if (record is not null)
                 {
                     if (field.Type == FieldType.YesNo)
                     {
                         var check = new SKRect(rect.MidX - 5, rect.MidY - 5, rect.MidX + 5, rect.MidY + 5);
                         _drawing.Fill(canvas, check, Theme.Surface); _drawing.Stroke(canvas, check, Theme.MutedText);
-                        if (FieldValues.Parse(field, records[row][field.Name]) is true)
+                        if (FieldValues.Parse(field, record[field.Name]) is true)
                         {
                             using var path = new SKPath(); path.MoveTo(check.Left + 2, check.MidY); path.LineTo(check.MidX - 1, check.Bottom - 2); path.LineTo(check.Right - 1, check.Top + 2); _drawing.Path(canvas, path, Theme.Text, 1.6f);
                         }
                     }
-                    else _drawing.CellText(canvas, FieldValues.Display(field, records[row][field.Name]), rect, Theme.Text, Theme.FontSize,
+                    else _drawing.CellText(canvas, FieldValues.Display(field, record[field.Name]), rect, Theme.Text, Theme.FontSize,
                         right: field.Type is FieldType.Integer or FieldType.AutoNumber or FieldType.Decimal or FieldType.Currency);
                 }
                 else if (field.Type == FieldType.AutoNumber) _drawing.CellText(canvas, "(New)", rect, Theme.MutedText, Theme.FontSize);
@@ -97,11 +99,9 @@ public sealed class DatasheetRenderer : IDisposable
         }
         if (state.SelectedRow >= 0 && state.SelectedRow < records.Count && state.SelectedColumn >= 0 && state.SelectedColumn < fields.Count)
         {
-            var active = CellBounds(fields, state.SelectedRow, state.SelectedColumn, state); active.Inflate(-1, -1);
-            _drawing.Stroke(canvas, active, Theme.ActiveCell, 2);
+            var active = CellBounds(fields, state.SelectedRow, state.SelectedColumn, state); active.Inflate(-1, -1); _drawing.Stroke(canvas, active, Theme.ActiveCell, 2);
         }
-        canvas.Restore();
-        canvas.Save(); canvas.ClipRect(new(Theme.RowHeaderWidth, 0, width, Theme.ColumnHeaderHeight));
+        canvas.Restore(); canvas.Save(); canvas.ClipRect(new(Theme.RowHeaderWidth, 0, width, Theme.ColumnHeaderHeight));
         _drawing.Fill(canvas, new(0, 0, width, Theme.ColumnHeaderHeight), Theme.Header);
         var headerX = Theme.RowHeaderWidth - state.OffsetX;
         for (var i = 0; i < fields.Count; i++)
@@ -111,15 +111,12 @@ public sealed class DatasheetRenderer : IDisposable
             if (i == state.SelectedColumn) _drawing.Fill(canvas, rect, Theme.SelectionHeader);
             _drawing.Stroke(canvas, new(rect.Left - .5f, -.5f, rect.Right - .5f, rect.Bottom - .5f), Theme.GridLine);
             _drawing.CellText(canvas, field.DisplayName, new(rect.Left, rect.Top, rect.Right - 16, rect.Bottom), Theme.Text, Theme.FontSize);
-            var cx = rect.Right - 10; var cy = rect.MidY + 1;
-            using var arrow = new SKPath();
-            if (Names.Equal(state.SortField, field.Name) && !state.SortDescending)
-            { arrow.MoveTo(cx - 3, cy + 2); arrow.LineTo(cx + 3, cy + 2); arrow.LineTo(cx, cy - 2); }
+            var cx = rect.Right - 10; var cy = rect.MidY + 1; using var arrow = new SKPath();
+            if (Names.Equal(state.SortField, field.Name) && !state.SortDescending) { arrow.MoveTo(cx - 3, cy + 2); arrow.LineTo(cx + 3, cy + 2); arrow.LineTo(cx, cy - 2); }
             else { arrow.MoveTo(cx - 3, cy - 2); arrow.LineTo(cx + 3, cy - 2); arrow.LineTo(cx, cy + 2); }
             arrow.Close(); _drawing.Path(canvas, arrow, Theme.MutedText, fill: true);
         }
-        canvas.Restore();
-        _drawing.Fill(canvas, new(0, 0, Theme.RowHeaderWidth, bodyBottom), Theme.Header);
+        canvas.Restore(); _drawing.Fill(canvas, new(0, 0, Theme.RowHeaderWidth, bodyBottom), Theme.Header);
         _drawing.Stroke(canvas, new(-.5f, -.5f, Theme.RowHeaderWidth - .5f, Theme.ColumnHeaderHeight - .5f), Theme.GridLine);
         for (var row = first; row < end; row++)
         {
@@ -132,8 +129,7 @@ public sealed class DatasheetRenderer : IDisposable
             {
                 using var arrow = new SKPath(); arrow.MoveTo(10, y + 8); arrow.LineTo(16, y + Theme.RowHeight / 2); arrow.LineTo(10, y + Theme.RowHeight - 8); arrow.Close(); _drawing.Path(canvas, arrow, Theme.Text, fill: true);
             }
-            _drawing.Line(canvas, 0, y + Theme.RowHeight - .5f, Theme.RowHeaderWidth, y + Theme.RowHeight - .5f, Theme.GridLine);
-            canvas.Restore();
+            _drawing.Line(canvas, 0, y + Theme.RowHeight - .5f, Theme.RowHeaderWidth, y + Theme.RowHeight - .5f, Theme.GridLine); canvas.Restore();
         }
         _drawing.Line(canvas, Theme.RowHeaderWidth - .5f, 0, Theme.RowHeaderWidth - .5f, bodyBottom, Theme.GridLine);
         if (state.ShowTotals) DrawTotals(canvas, width, height, fields, records, state);
@@ -141,24 +137,19 @@ public sealed class DatasheetRenderer : IDisposable
     }
     private void DrawTotals(SKCanvas canvas, float width, float height, IReadOnlyList<FieldDefinition> fields, IReadOnlyList<Record> records, DatasheetViewState state)
     {
-        var y = height - Theme.RowHeight;
+        var totals = _totals.GetValues(fields, records); var y = height - Theme.RowHeight;
         _drawing.Fill(canvas, new(0, y, width, height), Theme.Header); _drawing.Line(canvas, 0, y, width, y, Theme.GridLine);
         _drawing.CellText(canvas, "Σ", new(0, y, Theme.RowHeaderWidth, height), Theme.Text, 15, true);
         var x = Theme.RowHeaderWidth - state.OffsetX;
+        canvas.Save(); canvas.ClipRect(new(Theme.RowHeaderWidth, y, width, height));
         for (var i = 0; i < fields.Count; i++)
         {
-            var field = fields[i]; var rect = new SKRect(x, y, x + (float)field.Width, height); x = rect.Right;
+            var rect = new SKRect(x, y, x + (float)fields[i].Width, height); x = rect.Right;
             if (rect.Right < Theme.RowHeaderWidth || rect.Left > width) continue;
-            string text = i == 0 ? records.Count.ToString("N0") : "";
-            // The host may disable totals on large sources; totals are not part of the normal paint path.
-            if (field.Type is FieldType.Decimal or FieldType.Currency)
-            {
-                try { var total = records.Sum(r => (decimal?)FieldValues.Parse(field, r[field.Name]) ?? 0); text = total.ToString("N2", FieldValues.Culture); }
-                catch (OverflowException) { text = "Overflow"; }
-            }
-            _drawing.CellText(canvas, text, rect, Theme.Text, Theme.FontSize, true, true);
+            _drawing.CellText(canvas, totals[i], rect, Theme.Text, Theme.FontSize, true, true);
             _drawing.Line(canvas, rect.Right - .5f, y, rect.Right - .5f, height, Theme.GridLine);
         }
+        canvas.Restore();
     }
-    public void Dispose() => _drawing.Dispose();
+    public void Dispose() { _totals.Invalidate(); _drawing.Dispose(); }
 }

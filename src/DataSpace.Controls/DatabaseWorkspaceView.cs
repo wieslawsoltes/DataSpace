@@ -10,11 +10,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     private readonly NavigationPane _navigation = new();
     private readonly DocumentTabStrip _tabs = new();
     private readonly RecordNavigator _navigator = new();
-    private readonly ContentControl _content = new()
-    {
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        VerticalContentAlignment = VerticalAlignment.Stretch
-    };
+    private readonly ContentControl _content = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
     private readonly TextBlock _title = OfficeVisuals.Text("DataSpace", 13, "FFFFFF");
     private readonly TextBlock _status = OfficeVisuals.Text("Ready", 11, "555555");
     private readonly TextBlock _error = OfficeVisuals.Text("", 12, "9C252A");
@@ -23,6 +19,8 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     private readonly Grid _body = OfficeVisuals.Grid("*", "220,*");
     private readonly List<DatabaseObjectItem> _documents = [];
     private readonly Button _expandNavigation;
+    private readonly DispatcherTimer _searchTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
+    private string _pendingSearch = "";
     private DatabaseObjectItem? _active;
     private DatasheetControl? _sheet;
     private IDatabaseEditor? _editor;
@@ -40,8 +38,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     public DatabaseWorkspaceView(DatabaseWorkspace workspace)
     {
         Workspace = workspace;
-        HorizontalContentAlignment = HorizontalAlignment.Stretch;
-        VerticalContentAlignment = VerticalAlignment.Stretch;
+        HorizontalContentAlignment = HorizontalAlignment.Stretch; VerticalContentAlignment = VerticalAlignment.Stretch;
         var root = OfficeVisuals.Grid("36,Auto,Auto,*,25"); root.Background = OfficeVisuals.Brush("FFFFFF");
         var titlebar = OfficeVisuals.Grid("*", "180,*,190"); titlebar.Background = OfficeVisuals.Brush("A4373A");
         OfficeVisuals.Add(titlebar, OfficeVisuals.Row(OfficeVisuals.Text("  DataSpace", 14, "FFFFFF", true), Quick("▣", "Save", "save"), Quick("↶", "Undo", "undo"), Quick("↷", "Redo", "redo")));
@@ -61,7 +58,8 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
         _tabs.Selected += item => Try(() => OpenObject(item)); _tabs.Closed += item => Try(() => CloseObject(item));
         _navigator.Navigate += index => _sheet?.SelectCell(index, _sheet.ViewState.SelectedColumn);
         _navigator.NewRecord += () => Execute("newRecord");
-        _navigator.SearchChanged += text => Try(() => { CommitActive(); _search = text; RefreshTable(); });
+        _navigator.SearchChanged += text => { _pendingSearch = text; _searchTimer.Stop(); _searchTimer.Start(); };
+        _searchTimer.Tick += (_, _) => { _searchTimer.Stop(); Try(() => { CommitActive(); _search = _pendingSearch; RefreshTable(); }); };
         KeyDown += (_, e) =>
         {
             if (e.Key == VirtualKey.F6) { _navigation.FocusSearch(); e.Handled = true; return; }
@@ -124,7 +122,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
             _ => throw new DataSpaceException("Unknown database object.")
         };
         DisposeActive(); _active = item; _design = design; _editor = view as IDatabaseEditor; _sheet = view as DatasheetControl;
-        _filter = ""; _search = ""; _sortField = null; _descending = false;
+        _filter = ""; _search = ""; _pendingSearch = ""; _sortField = null; _descending = false;
         if (view is QueryEditorControl query) { query.ConfirmActionAsync = ConfirmAsync; query.Error += ShowError; }
         if (view is FormEditorControl form) form.Error += ShowError;
         if (view is ReportPreviewControl report) report.Error += ShowError;
@@ -142,10 +140,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
         {
             try
             {
-                Workspace.Edit("Edit records", document =>
-                {
-                    foreach (var group in edits.GroupBy(e => e.RecordId)) RecordOperations.Update(document, tableName, group.Key, group.ToDictionary(e => e.Field, e => e.Value, StringComparer.OrdinalIgnoreCase));
-                }); return true;
+                Workspace.UpdateRecords("Edit records", tableName, edits.Select(e => new RecordEdit(e.RecordId, e.Field, e.Value)).ToArray()); return true;
             }
             catch (Exception error) { ShowError(error.Message); return false; }
         };
@@ -158,11 +153,11 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     private void RefreshTable()
     {
         if (_sheet is null || _active?.Kind != DatabaseObjectKind.Table) return;
-        var result = TableView.Select(Workspace.Document, _active.Name, _filter, _sortField, _descending, _search);
+        var result = TableView.Open(Workspace.Document, _active.Name, _filter, _sortField, _descending, _search);
         _sheet.ViewState.SortField = _sortField; _sheet.ViewState.SortDescending = _descending;
-        _sheet.SetData(result.Fields, result.Records); _navigator.Update(_sheet.ViewState.SelectedRow, result.Records.Count, _filter.Length > 0 || _search.Length > 0);
+        _sheet.SetData(result.Fields, result); _navigator.Update(_sheet.ViewState.SelectedRow, result.Count, _filter.Length > 0 || _search.Length > 0);
     }
-    private void DisposeActive() { if (_content.Content is IDisposable disposable) disposable.Dispose(); _content.Content = null; _sheet = null; _editor = null; }
+    private void DisposeActive() { _searchTimer.Stop(); if (_content.Content is IDisposable disposable) disposable.Dispose(); _content.Content = null; _sheet = null; _editor = null; }
     private void EmptyView()
     {
         var panel = OfficeVisuals.Stack(OfficeVisuals.Text("Build your database", 27, "A4373A"), OfficeVisuals.Text("Create a table, import a CSV file, or open a DataSpace database.", 14, "666666"), OfficeVisuals.Button("Create Table", () => Execute("newTable"), "table"));
@@ -192,5 +187,5 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
         var validated = DocumentCodec.Clone(document); DisposeActive(); _active = null; _documents.Clear(); Workspace.Replace(validated);
         if (Workspace.Document.Tables.FirstOrDefault() is { } first) OpenObject(new(DatabaseObjectKind.Table, first.Name)); else EmptyView(); UpdateChrome();
     }
-    public void Dispose() { Workspace.Changed -= OnChanged; DisposeActive(); }
+    public void Dispose() { _searchTimer.Stop(); Workspace.Changed -= OnChanged; DisposeActive(); }
 }
