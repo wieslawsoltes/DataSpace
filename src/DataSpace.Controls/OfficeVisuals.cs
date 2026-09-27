@@ -88,13 +88,22 @@ public sealed class SkiaSurface : UserControl
     public SkiaSurface()
     {
         IsTabStop = false;
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        VerticalContentAlignment = VerticalAlignment.Stretch;
+        // Drawing children do not participate in pointer hit testing. A non-null
+        // transparent brush gives their full logical bounds a hit target whose
+        // pointer/gesture events bubble to this reusable surface.
+        var inputRoot = new Grid { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0)) };
+        Content = inputRoot;
         if (SKCanvasElement.IsSupportedOnCurrentPlatform())
         {
-            _direct = new DirectCanvas(this) { IsHitTestVisible = false }; Content = _direct;
+            _direct = new DirectCanvas(this) { IsHitTestVisible = false };
+            inputRoot.Children.Add(_direct);
         }
         else
         {
-            _fallback = new SKXamlCanvas { IsHitTestVisible = false }; Content = _fallback;
+            _fallback = new SKXamlCanvas { IsHitTestVisible = false };
+            inputRoot.Children.Add(_fallback);
             _fallback.PaintSurface += (_, e) =>
             {
                 if (ActualWidth <= 0 || ActualHeight <= 0) return;
