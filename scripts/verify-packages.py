@@ -27,13 +27,14 @@ count = 0
 for group in tree.getroot().findall('ItemGroup'):
     for reference in list(group.findall('ProjectReference')):
         group.remove(reference)
-        # Uno application display versions need not equal reusable-library prerelease versions.
         ET.SubElement(group, 'PackageReference', {'Include': 'DataSpace.Controls', 'Version': '[' + version + ']'})
         count += 1
 if count != 1 or tree.getroot().findall('.//ProjectReference'):
     raise SystemExit('Expected exactly one app-to-controls reference; refusing an ambiguous consumer test.')
 tree.write(project, encoding='utf-8', xml_declaration=False)
-subprocess.run(['dotnet', 'restore', str(project), '--source', str(packages), '--source', 'https://api.nuget.org/v3/index.json'], cwd=root, check=True)
+# Uno's Debug dependency graph includes DevServer; restore the same configuration
+# that is compiled below instead of reusing Debug assets in an optimized build.
+subprocess.run(['dotnet', 'restore', str(project), '-p:Configuration=Release', '--source', str(packages), '--source', 'https://api.nuget.org/v3/index.json'], cwd=root, check=True)
 for framework in ('net10.0-desktop', 'net10.0-browserwasm'):
     subprocess.run(['dotnet', 'build', str(project), '-c', 'Release', '-f', framework, '--no-restore'], cwd=root, check=True)
 libraries = json.loads((target / 'obj' / 'project.assets.json').read_text())['libraries']

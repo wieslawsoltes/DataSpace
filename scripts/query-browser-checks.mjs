@@ -17,7 +17,16 @@ export async function queryBrowserChecks(page, baseURL, screenshots, ready) {
         await (await target('button', name, last)).press('Enter'); await page.waitForTimeout(250);
     }
     async function edit(name, value) {
-        const input = await target('textbox', name); await input.fill(value); await input.press('Tab');
+        const input = await target('textbox', name);
+        // Let Uno transfer semantic focus to its native editor before replacing text.
+        // Keyboard selection/deletion exercises the same path a user uses; fill() on
+        // an accessibility proxy can insert text without clearing the managed selection.
+        await input.focus(); await page.waitForTimeout(150);
+        await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace');
+        await page.keyboard.insertText(value); await page.keyboard.press('Tab');
+        await page.waitForTimeout(150);
+        const normalize = text => text.replace(/\r\n?/g, '\n');
+        assert.equal(normalize(await input.inputValue()), normalize(value), name + ' must replace, not append to, the existing text.');
     }
     async function database() {
         return page.evaluate(async baseURL => {
@@ -49,7 +58,7 @@ export async function queryBrowserChecks(page, baseURL, screenshots, ready) {
         await saveQuery(queryName, 'LIKE');
         await writeFile(screenshots + '/query-first-state.json', JSON.stringify((await database()).Queries.find(query => query.Name === queryName), null, 2));
         await button('Design View');
-        assert.equal(await (await target('textbox', 'Criteria column 1')).inputValue(), "Like 'B*'", 'Design/SQL round trip must preserve the grid instead of moving its criteria into WHERE.');
+        assert.equal(await (await target('textbox', 'Criteria column 1')).inputValue(), "Like 'B*'", 'Design/SQL round trip must preserve grid criteria.');
         await edit('Or 1 column 1', "Like 'T*'");
         await page.mouse.move(330, 330); await page.mouse.down(); await page.mouse.move(450, 370, { steps: 8 }); await page.mouse.up();
         await page.screenshot({ path: screenshots + '/query-design.png', fullPage: true });
@@ -72,7 +81,7 @@ export async function queryBrowserChecks(page, baseURL, screenshots, ready) {
         await page.screenshot({ path: screenshots + '/query-totals.png', fullPage: true }); checks++;
         await button('Customers'); await button('Home'); await button('View'); await button('Indexes');
         await button('Add Index'); await button('Add Index Field');
-        await (await target('checkbox', 'Unique')).check();
+        const unique = await target('checkbox', 'Unique'); await unique.press('Space'); assert.equal(await unique.isChecked(), true);
         await page.screenshot({ path: screenshots + '/table-indexes.png', fullPage: true });
         await button('Save Indexes'); await page.keyboard.press('Control+s');
         await page.waitForFunction(async baseURL => {
@@ -83,6 +92,6 @@ export async function queryBrowserChecks(page, baseURL, screenshots, ready) {
         return checks;
     } finally {
         await writeFile(screenshots + '/query-accessibility.txt', await page.locator('body').ariaSnapshot());
-        await writeFile(screenshots + '/query-peer-bounds.json', JSON.stringify(await page.getByRole('textbox').evaluateAll(elements => elements.map(element => ({html: element.outerHTML, rect: element.getBoundingClientRect().toJSON()}))), null, 2));
+        await writeFile(screenshots + '/query-peer-bounds.json', JSON.stringify(await page.getByRole('textbox').evaluateAll(elements => elements.map(element => ({html: element.outerHTML, value: element.value, rect: element.getBoundingClientRect().toJSON()}))), null, 2));
     }
 }
