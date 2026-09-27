@@ -4,6 +4,7 @@
          consuming application, not to Uno's control-library package layout. -->
     <TargetFrameworks>net10.0</TargetFrameworks>
     <OutputType>Library</OutputType>
+    <IsPackable>true</IsPackable>
     <GenerateLibraryLayout>true</GenerateLibraryLayout>
     <UnoFeatures>SkiaRenderer;</UnoFeatures>
     <Description>Reusable Office-style Uno ribbon, navigation, datasheet and database designer controls.</Description>
