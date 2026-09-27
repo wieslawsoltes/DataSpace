@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+artifacts/
+TestResults/
+node_modules/
+playwright-report/
+test-results/
+*.user
+*.suo
+.DS_Store

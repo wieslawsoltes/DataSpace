@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Description>DataSpace typed document model, validation, relational constraints and transactional workspace.</Description>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+</Project>

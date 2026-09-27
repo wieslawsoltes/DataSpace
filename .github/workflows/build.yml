@@ -10,17 +10,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - name: Resolve current stable tooling
-        shell: bash
+      - name: Verify core
+        run: dotnet build src/DataSpace.Core/DataSpace.Core.csproj -c Release
+      - name: Verify Uno project conventions
         run: |
-          for p in uno.sdk uno.templates skiasharp skiasharp.views.uno.winui; do
-            echo "$p=$(curl -fsSL https://api.nuget.org/v3-flatcontainer/$p/index.json | jq -r '[.versions[] | select(contains("-") | not)] | last')"
-          done
-          dotnet new install Uno.Templates
-          dotnet new unoapp -h
-          dotnet new unoapp -preset blank -platforms browser -o /tmp/UnoProbe --no-restore
-          find /tmp/UnoProbe -name '*.csproj' -o -name 'global.json' -o -name '*Program.cs' | xargs -r -n 1 sh -c 'echo FILE: "$0"; cat "$0"'
+          dotnet new install Uno.Templates@6.7.30
+          dotnet new unoapp -preset blank -platforms wasm desktop -o /tmp/UnoProbe --skip-restore
+          dotnet new unolib -o /tmp/UnoLibrary --skip-restore
+          find /tmp/UnoProbe /tmp/UnoLibrary -name '*.csproj' -o -name 'global.json' -o -name '*Program.cs' -o -name 'App.xaml' | xargs -r -n 1 sh -c 'echo FILE: "$0"; cat "$0"'
