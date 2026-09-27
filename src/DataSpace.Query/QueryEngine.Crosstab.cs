@@ -32,6 +32,7 @@ public sealed partial class QueryEngine
         if (plan.Where is { } predicate) Scalar(predicate);
         foreach (var join in plan.Joins) if (join.Condition is { } on) Scalar(on);
         var names = OutputNames(plan.Projections);
+        if (names.Count > Options.MaximumCrosstabColumns) throw new DataSpaceException("Crosstab column limit exceeded.");
         foreach (var name in names) { schema.Values[name] = null; schema.Ambiguous.Remove(name); }
         if (plan.Having is { } having) Bind(having);
         foreach (var order in plan.Order) Bind(order.Expression);
@@ -68,7 +69,12 @@ public sealed partial class QueryEngine
             statistics.AggregateInputRows++;
             var key = SqlValue.Key(plan.Groups.Select(g => g.Eval(row)));
             if (!groups.TryGetValue(key, out var group))
-            { CheckSize(groups.Count + 1); groups.Add(key, group = new(new(row, functions))); }
+            {
+                CheckSize(groups.Count + 1);
+                if ((long)(groups.Count + 1) * Math.Max(names.Count, Math.Max(1, functions.Length)) > Options.MaximumCrosstabCells)
+                    throw new DataSpaceException("Crosstab group-state limit exceeded.");
+                groups.Add(key, group = new(new(row, functions)));
+            }
             // Row totals include all matching source rows, including values excluded by IN.
             group.Totals.Add(row);
             var value = transform.Pivot.Eval(row); if (value is null) continue;

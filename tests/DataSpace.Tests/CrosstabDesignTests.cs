@@ -47,6 +47,15 @@ public sealed class CrosstabDesignTests
         Assert.Equal(before, DocumentCodec.Serialize(document));
     }
     [Fact]
+    public void EmptyPivotStillChecksHeadingAndGroupStateBudgets()
+    {
+        var document = CrosstabAndMakeTableTests.Sales();
+        Assert.Throws<DataSpaceException>(() => new QueryEngine(new() { MaximumCrosstabColumns = 1 }).Select(document,
+            "TRANSFORM Count(*) SELECT Region, Count(*) AS N FROM Sales WHERE 1=0 GROUP BY Region PIVOT Quarter"));
+        Assert.Throws<DataSpaceException>(() => new QueryEngine(new() { MaximumCrosstabCells = 1 }).Select(document,
+            "TRANSFORM Count(*) SELECT Region FROM Sales GROUP BY Region PIVOT NULL"));
+    }
+    [Fact]
     public void ReusedSourceContextDoesNotAliasResultsOrSavedSources()
     {
         var document = CrosstabAndMakeTableTests.Sales(); var fast = new QueryEngine();

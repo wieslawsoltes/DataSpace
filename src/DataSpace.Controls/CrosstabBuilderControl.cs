@@ -23,7 +23,7 @@ public sealed class CrosstabBuilderControl : UserControl
         _where = OfficeVisuals.Input(design?.Where ?? "", "Optional WHERE expression");
         _totals = new CheckBox { Content = "Include row totals", IsChecked = design?.ShowRowTotals == true, FontSize = 12 };
         AutomationProperties.SetName(_totals, "Include row totals");
-        var panel = new StackPanel { Spacing = 6, MinWidth = 430 };
+        var panel = new StackPanel { Spacing = 6, Width = 430 };
         EditorVisuals.Labeled(panel, "Crosstab source", _source);
         panel.Children.Add(OfficeVisuals.Text("Row headings", 12, "555555"));
         var rows = EditorVisuals.Scroll(_fields); rows.Height = 120; panel.Children.Add(rows);
