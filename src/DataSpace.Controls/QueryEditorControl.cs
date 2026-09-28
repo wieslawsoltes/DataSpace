@@ -74,7 +74,7 @@ public sealed partial class QueryEditorControl : UserControl, IDatabaseEditor
             SynchronizeDesign(); CrosstabDesign? definition = null;
             try { definition = CrosstabDesign.FromSql(_sql.Text); } catch (DataSpaceException) { /* New builder draft; SQL is unchanged until Generate. */ }
             var builder = new CrosstabBuilderControl(_workspace.Document, definition);
-            var errorText = OfficeVisuals.Text("", 12, "9C252A"); errorText.TextWrapping = TextWrapping.Wrap;
+            var errorText = new ValidationMessageControl();
             var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Crosstab Query", Content = OfficeVisuals.Stack(errorText, builder),
                 PrimaryButtonText = "Generate SQL", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.None };
             string? generated = null;
@@ -90,7 +90,7 @@ public sealed partial class QueryEditorControl : UserControl, IDatabaseEditor
         catch (Exception error) { ShowError(error.Message); }
         finally { _dialogOpen = false; }
     }
-    private void ShowError(string message) { _status.Text = message; Error?.Invoke(message); }
+    private void ShowError(string message) { _status.Text = message; AutomationProperties.SetName(_status, message); Error?.Invoke(message); }
     private void TrySwitch(QueryEditorView view) { try { SwitchView(view); } catch (Exception error) { ShowError(error.Message); } }
     public void SwitchView(QueryEditorView view)
     {

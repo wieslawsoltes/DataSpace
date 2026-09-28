@@ -12,7 +12,7 @@ public sealed partial class QueryEditorControl
         {
             SynchronizeDesign();
             var builder = new FindQueryBuilderControl(_workspace.Document, kind);
-            var errorText = OfficeVisuals.Text("", 12, "9C252A"); errorText.TextWrapping = TextWrapping.Wrap;
+            var errorText = new ValidationMessageControl();
             var dialog = new ContentDialog { XamlRoot = XamlRoot,
                 Title = kind == FindQueryKind.Duplicates ? "Find Duplicates Query" : "Find Unmatched Query",
                 Content = OfficeVisuals.Stack(errorText, builder), PrimaryButtonText = "Generate SQL", CloseButtonText = "Cancel",
