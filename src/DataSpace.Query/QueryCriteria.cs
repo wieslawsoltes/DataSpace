@@ -83,6 +83,7 @@ internal static class SqlText
         BinaryExpr value => "(" + Format(value.Left) + " " + value.Op + " " + Format(value.Right) + ")",
         NullExpr value => "(" + Format(value.Operand) + " IS " + (value.Negated ? "NOT " : "") + "NULL)",
         InExpr value => "(" + Format(value.Operand) + (value.Negated ? " NOT IN (" : " IN (") + string.Join(", ", value.Items.Select(Format)) + "))",
+        SubqueryExpr value => value.ToSql(),
         FunctionExpr value => value.Name + "(" + string.Join(", ", value.Arguments.Select(Format)) + ")",
         _ => throw new DataSpaceException("Expression cannot be represented in Design View.")
     };
@@ -95,6 +96,8 @@ internal static class SqlText
         (BinaryExpr a, BinaryExpr b) => a.Op == b.Op && Same(a.Left, b.Left) && Same(a.Right, b.Right),
         (NullExpr a, NullExpr b) => a.Negated == b.Negated && Same(a.Operand, b.Operand),
         (InExpr a, InExpr b) => a.Negated == b.Negated && Same(a.Operand, b.Operand) && Sequence(a.Items, b.Items),
+        (SubqueryExpr a, SubqueryExpr b) => a.Kind == b.Kind && a.Negated == b.Negated && a.Comparison == b.Comparison && a.Sql == b.Sql &&
+            (a.Operand is null ? b.Operand is null : b.Operand is not null && Same(a.Operand, b.Operand)),
         (FunctionExpr a, FunctionExpr b) => a.Name == b.Name && Sequence(a.Arguments, b.Arguments),
         _ => false
     };

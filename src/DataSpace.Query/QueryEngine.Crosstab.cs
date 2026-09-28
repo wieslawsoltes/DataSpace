@@ -11,19 +11,21 @@ public sealed partial class QueryEngine
     }
     private sealed record PivotColumn(string Key, string Name, object Value);
     private QueryResult ExecuteTransform(DatabaseDocument document, TransformStatement transform,
-        IReadOnlyDictionary<string, object?> parameters, CancellationToken token, HashSet<string> path, QueryStatistics statistics)
+        IReadOnlyDictionary<string, object?> parameters, CancellationToken token, HashSet<string> path, QueryStatistics statistics, QueryExecution execution, EvaluationContext? outer = null)
     {
         var plan = transform.Query;
         var sources = new List<(Source Source, TableDefinition Table)>();
-        if (plan.Source is { } from) sources.Add((from, ResolveSource(document, from.Table, parameters, token, path, statistics)));
-        foreach (var join in plan.Joins) sources.Add((join.Source, ResolveSource(document, join.Source.Table, parameters, token, path, statistics)));
+        if (plan.Source is { } from) sources.Add((from, ResolveSource(document, from.Table, parameters, token, path, statistics, execution)));
+        foreach (var join in plan.Joins) sources.Add((join.Source, ResolveSource(document, join.Source.Table, parameters, token, path, statistics, execution)));
         if (sources.Select(s => s.Source.Alias).Distinct(StringComparer.OrdinalIgnoreCase).Count() != sources.Count)
             throw new DataSpaceException("Duplicate table alias.");
         if (plan.Projections.Any(p => p.Wildcard is not null || !p.Expression.GroupSafe(plan.Groups)))
             throw new DataSpaceException("Crosstab row headings must be grouped or aggregated, without wildcards.");
-        var schema = new EvaluationContext { Parameters = parameters };
+        var scope = new SubqueryScope(this, document, parameters, token, path, statistics, execution, execution.Depth);
+        var environment = new EvaluationContext { Parameters = parameters, Outer = outer, Subqueries = scope.Evaluate };
+        var schema = environment.Clone();
         foreach (var source in sources) schema = AddSource(schema, source.Table, source.Source.Alias, null);
-        void Bind(Expr expression) { foreach (var name in ExpressionAnalysis.Names(expression)) schema.Resolve(name.Name, name.Parameter); }
+        void Bind(Expr expression) => scope.Bind(expression, schema);
         void Scalar(Expr expression)
         { if (expression.Aggregate) throw new DataSpaceException("WHERE, GROUP BY, PIVOT and ON require non-aggregate expressions."); Bind(expression); }
         foreach (var projection in plan.Projections) Bind(projection.Expression);
@@ -61,9 +63,9 @@ public sealed partial class QueryEngine
             }
         var scanExpressions = expressions.Concat(plan.Groups).Append(transform.Pivot).Append(transform.Aggregate);
         if (plan.Where is not null) scanExpressions = scanExpressions.Append(plan.Where);
-        var scanFields = plan.Joins.Count == 0 ? PrunedFields(sources[0].Table, sources[0].Source.Alias, scanExpressions) : null;
-        IEnumerable<EvaluationContext> rows = SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics, Options.EnableReusableRowContexts && plan.Joins.Count == 0, scanFields);
-        for (var i = 0; i < plan.Joins.Count; i++) rows = JoinRows(rows, plan.Joins[i], sources[i + 1].Table, sources.Take(i + 1).ToList(), parameters, token, statistics);
+        var scanFields = plan.Joins.Count == 0 ? PrunedFields(sources[0].Table, sources[0].Source.Alias, scanExpressions.Concat(scope.ScanReferences)) : null;
+        IEnumerable<EvaluationContext> rows = SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics, Options.EnableReusableRowContexts && plan.Joins.Count == 0, scanFields, environment, execution);
+        for (var i = 0; i < plan.Joins.Count; i++) rows = JoinRows(rows, plan.Joins[i], sources[i + 1].Table, sources.Take(i + 1).ToList(), parameters, token, statistics, execution);
         var groups = new Dictionary<string, PivotGroup>(StringComparer.Ordinal); long cells = 0;
         foreach (var row in rows)
         {
@@ -122,12 +124,12 @@ public sealed partial class QueryEngine
             Records = output.Select(row => new Record { Values = fields.Select((field, i) => KeyValuePair.Create(field.Name, FieldValues.FromObject(row.Values[i]))).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase) }).ToList()
         };
     }
-    private int MakeTable(DatabaseDocument document, MakeTableStatement statement, IReadOnlyDictionary<string, object?> args, CancellationToken token)
+    private int MakeTable(DatabaseDocument document, MakeTableStatement statement, IReadOnlyDictionary<string, object?> args, CancellationToken token, QueryStatistics statistics, QueryExecution execution)
     {
         Names.Validate(statement.Table);
         if (document.Tables.Any(t => Names.Equal(t.Name, statement.Table)) || document.Queries.Any(q => Names.Equal(q.Name, statement.Table)))
             throw new DataSpaceException("A table or query with that name already exists: " + statement.Table);
-        var result = Read(document, statement.Query, args, token, new(StringComparer.OrdinalIgnoreCase), new());
+        var result = Read(document, statement.Query, args, token, new(StringComparer.OrdinalIgnoreCase), statistics, execution);
         var table = new TableDefinition { Name = statement.Table, Fields = result.Fields.Select(field => new FieldDefinition
         { Name = field.Name, Type = field.Type, MaxLength = field.MaxLength, Width = field.Width }).ToList() };
         foreach (var row in result.Records) { token.ThrowIfCancellationRequested(); RecordOperations.Insert(table, row.Values); }
