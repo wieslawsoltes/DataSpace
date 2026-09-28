@@ -8,7 +8,17 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
     async function button(name, last = false) {
         const matches = page.getByRole('button', { name, exact: true });
         const target = last ? matches.last() : matches.first();
-        if (['Generate SQL', 'Cancel', 'Continue'].includes(name)) {
+        if (name === 'Continue') {
+            // The confirmation defaults to Cancel. Use real pointer input for
+            // this destructive-action test instead of treating the accessibility
+            // proxy's DOM focus as the native ContentDialog focus state.
+            const box = await target.boundingBox();
+            const viewport = page.viewportSize();
+            assert.ok(box && viewport && box.width > 8 && box.height > 8 &&
+                box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width &&
+                box.y + box.height <= viewport.height, 'Continue must have visible, in-viewport native bounds.');
+            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        } else if (['Generate SQL', 'Cancel'].includes(name)) {
             // A DOM focus() on Uno's clipped semantic button is not necessarily
             // a native focus transition. Start with a real Tab even when that
             // proxy already looks focused; then activate the native target.

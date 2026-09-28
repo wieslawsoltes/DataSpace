@@ -12,7 +12,7 @@ SELECT pipelines stream ordinary projections and filters. Without ORDER BY, TOP/
 
 Single-source SELECT and TRANSFORM scans also prune unused fields. Every expression is bound against the complete schema before choosing the physical scan. Projections, filters, grouping, sorting, HAVING, pivot expressions and aggregate arguments contribute their referenced fields. Expanded wildcards retain all fields. Explicit parameters do not require source values; unqualified names retain the existing field-before-parameter resolution. Output aliases may conservatively retain an extra field rather than risk dropping a required input. Join inputs still use complete independent contexts. `COUNT(*)` can scan/count records without decoding any typed field values, but still observes cancellation and row-work limits. Correlated subquery references also retain their required outer fields.
 
-Eligible independent subqueries cache their result values within one execution. Correlated, time-dependent and saved-source-dependent subqueries remain uncached. IN can index a homogeneous set with the same comparison family as the outer value; coercing comparisons keep the reference comparator. Caches are not shared across executions or documents. These are transient lookup sets, not persistent database indexes. The index designer manages constraint metadata; a durable page store, persistent B-trees and a cost-based planner remain unimplemented.
+Eligible independent subqueries cache their result values within one execution. Repeated deterministic correlated tuples may also reuse inner results using exact bound outer-reference keys. Time-dependent and saved-source-dependent subqueries remain uncached. IN can index a homogeneous set with the same comparison family as the outer value; coercing comparisons keep the reference comparator. Caches are not shared across executions or documents. These are transient lookup sets, not persistent database indexes. The index designer manages constraint metadata; a durable page store, persistent B-trees and a cost-based planner remain unimplemented.
 
 ## Reproduce
 
@@ -76,7 +76,7 @@ The first changes only `EnableSubqueryCache`. The reference performs 500 inner e
 
 These are comparisons against switchable reference paths in the same implementation, not a prior release that lacked subquery support. Caching avoids repeated execution; hashing trades extra transient set storage for fewer comparisons and may allocate more than a cached linear scan. The benchmark reports this allocation tradeoff rather than implying every optimization reduces memory. Warmups, alternating samples and JSON output follow the same measurement procedure above.
 
-Read [subquery contracts and limits](SUBQUERIES.md) for cache admission estimates, lexical scope, volatile/correlated exclusions and execution-wide row/comparison/depth limits. Unknown names in an unvisited subquery still fail binding; the optimized path must not hide missing fields or unsafe action statements.
+Read [subquery contracts and limits](SUBQUERIES.md) for cache admission estimates, lexical scope, volatile/saved-source exclusions and repeated-correlation keys and execution-wide row/comparison/depth limits. Unknown names in an unvisited subquery still fail binding; the optimized path must not hide missing fields or unsafe action statements.
 
 ## Remaining scaling limits
 
@@ -85,3 +85,9 @@ Record-list copying and identity maps still scale with table size. Filters/sorts
 Undo/redo deep-copy a restored snapshot. Complex cascades and action queries retain full-document validation. Saves still serialize the whole document, and browser storage/import retains its size limit. WebAssembly threads are disabled in the Pages build; CPU-heavy operations can still block browser input. No hardware-GPU, million-row end-to-end, native OS or multi-user performance qualification is claimed.
 
 All public model objects remain mutable for construction/serialization. Change live data through the workspace transaction API only. A virtual view's returned records are detached display snapshots with a bounded lifetime, not writable backing storage. External direct mutation can bypass constraints, invalidate caches and violate snapshot/history assumptions.
+
+## Repeated correlated subqueries
+
+Deterministic repeated outer tuples can reuse an inner result within one query execution. The key encodes exact bound outer values, including lexical scope, case and decimal representation, and the shared admission budget includes key storage. Independent and correlated entries share a 128-entry per-scope limit. New tuples beyond the limit use the reference evaluator; existing admitted tuples remain reusable. Volatile/saved-source subqueries are excluded. See SUBQUERIES.md for semantics and limits.
+
+The `Repeated correlation / 500 outer / 250 inner / 8 keys` benchmark switches only `EnableSubqueryCache` and contains no independent nested expressions. It asserts identical rows, 500 versus eight subquery executions, and 125,500 versus 2,500 total input reads. Timings, raw samples, total allocation counts and the runner environment are written to the existing performance artifact; those counts are not whole-app latency or peak-memory measurements. Correlations with mostly distinct tuples remain scan-bound.

@@ -32,6 +32,8 @@ public sealed partial class QueryEditorControl : UserControl, IDatabaseEditor
     public QueryEditorControl(DatabaseWorkspace workspace, string name, bool design = false)
     {
         _workspace = workspace; _name = name;
+        _status.RegisterPropertyChangedCallback(TextBlock.TextProperty,
+            (element, _) => AutomationProperties.SetName(element, ((TextBlock)element).Text));
         var query = workspace.Document.Queries.First(q => Names.Equal(q.Name, name));
         _baselineSql = query.Sql; _state = _baselineState = query.DesignerState;
         _savedParameters = new(query.Parameters, StringComparer.OrdinalIgnoreCase);

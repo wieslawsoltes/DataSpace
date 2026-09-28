@@ -115,6 +115,9 @@ public sealed partial class QueryEngine
     {
         private readonly Dictionary<SubqueryExpr, SubqueryDescription> _bindings = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<SubqueryExpr, SubqueryValues> _cache = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<SubqueryExpr, CorrelationSlot[]> _correlations = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<SubqueryExpr, Dictionary<string, SubqueryValues>> _correlatedCache = new(ReferenceEqualityComparer.Instance);
+        private int _correlatedCount;
         private readonly HashSet<EvaluationContext> _localSchemas = [];
         private readonly List<OuterReference> _references = [];
         public bool Volatile { get; private set; }
@@ -139,6 +142,8 @@ public sealed partial class QueryEngine
                     if (subquery.Kind != SubqueryKind.Exists && description.Columns != 1)
                         throw new DataSpaceException("A scalar, IN, ANY or ALL subquery must return exactly one column.");
                     _bindings.Add(subquery, description);
+                    if (BindCorrelation(description.References, schema) is { Length: > 0 } slots)
+                        _correlations.Add(subquery, slots);
                 }
                 _references.AddRange(description.References); Volatile |= description.Volatile;
             }
@@ -160,7 +165,21 @@ public sealed partial class QueryEngine
         {
             token.ThrowIfCancellationRequested();
             if (!_bindings.TryGetValue(expression, out var binding)) throw new DataSpaceException("Subquery is not bound to this query scope.");
-            if (!_cache.TryGetValue(expression, out var values))
+            string? correlationKey = null;
+            Dictionary<string, SubqueryValues>? correlated = null;
+            var cached = _cache.TryGetValue(expression, out var values);
+            if (!cached && engine.Options.EnableSubqueryCache &&
+                !binding.Volatile && engine.Options.MaximumSubqueryCacheBytes > 0 &&
+                _correlations.TryGetValue(expression, out var slots))
+            {
+                // Coordinates come from lexical binding, not re-resolution by
+                // name: inner aliases cannot change which outer value is keyed.
+                correlationKey = CorrelationKey(row, slots, (int)Math.Min(32768L, engine.Options.MaximumSubqueryCacheBytes / 2));
+                _correlatedCache.TryGetValue(expression, out correlated);
+                if (correlationKey is not null && correlated is not null)
+                    cached = correlated.TryGetValue(correlationKey, out values);
+            }
+            if (!cached)
             {
                 execution.Enter();
                 try
@@ -183,10 +202,22 @@ public sealed partial class QueryEngine
                         result.Records.Select(r => FieldValues.Parse(result.Fields[0], r[result.Fields[0].Name])).ToArray());
                 }
                 finally { execution.Exit(); }
-                if (engine.Options.EnableSubqueryCache && binding.References.Count == 0 && !binding.Volatile &&
-                    _cache.Count < 128 && execution.Reserve(values.EstimatedBytes)) _cache.Add(expression, values);
+                if (engine.Options.EnableSubqueryCache && !binding.Volatile && _cache.Count + _correlatedCount < 128)
+                {
+                    if (binding.References.Count == 0 && execution.Reserve(values.EstimatedBytes)) _cache.Add(expression, values);
+                    else if (correlationKey is not null && execution.Reserve(values.EstimatedBytes + 128L + correlationKey.Length * 2L))
+                    {
+                        if (correlated is null) _correlatedCache[expression] = correlated = new(StringComparer.Ordinal);
+                        correlated.Add(correlationKey, values); _correlatedCount++;
+                    }
+                }
             }
-            else statistics.SubqueryCacheHits++;
+            else
+            {
+                statistics.SubqueryCacheHits++;
+            }
+            // Both cache paths and evaluation assign a non-null result container.
+            if (values is null) throw new InvalidOperationException("Missing subquery result.");
             if (expression.Kind == SubqueryKind.Exists) return values.Values[0];
             if (expression.Kind == SubqueryKind.Scalar) return values.Values.FirstOrDefault();
             var operand = expression.Operand!.Eval(row);
