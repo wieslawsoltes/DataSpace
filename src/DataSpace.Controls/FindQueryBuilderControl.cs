@@ -32,7 +32,7 @@ public sealed class FindQueryBuilderControl : UserControl
         panel.Children.Add(OfficeVisuals.Text("Detail output fields (none selected means all)", 12));
         var outputScroll = EditorVisuals.Scroll(_outputs); outputScroll.Height = 100; panel.Children.Add(outputScroll);
         var note = OfficeVisuals.Text(kind == FindQueryKind.Duplicates
-            ? "Summary uses grouped counts. Detail mode returns each duplicated record and uses bounded correlated queries. Output fields apply to detail mode only."
+            ? "Summary uses grouped counts. Single-key details use a cached duplicate-key set; composite details use bounded correlated queries. Output fields apply to detail mode only."
             : "Null source keys are unmatched. One-key queries use a cached membership set; multiple keys use a null-safe left-join test. No records are modified.", 11, "666666");
         note.TextWrapping = TextWrapping.Wrap; panel.Children.Add(note);
         var scroll = EditorVisuals.Scroll(panel); scroll.MaxHeight = 560; Content = scroll;

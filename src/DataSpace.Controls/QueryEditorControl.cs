@@ -83,7 +83,7 @@ public sealed partial class QueryEditorControl : UserControl, IDatabaseEditor
             dialog.PrimaryButtonClick += (_, e) =>
             {
                 try { generated = builder.ToSql(); }
-                catch (Exception error) { e.Cancel = true; errorText.Text = error.Message; }
+                catch (Exception error) { e.Cancel = true; generated = null; errorText.Text = error.Message; }
             };
             if (await dialog.ShowAsync() != ContentDialogResult.Primary || generated is null || _disposed) return;
             _designer?.Dispose(); _designer = null; _state = null; _sql.Text = generated;
