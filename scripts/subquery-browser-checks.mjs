@@ -17,7 +17,7 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
             assert.ok(box && viewport && box.width > 8 && box.height > 8 &&
                 box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width &&
                 box.y + box.height <= viewport.height, 'Continue must have visible, in-viewport native bounds.');
-            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { delay: 90 });
         } else if (['Generate SQL', 'Cancel'].includes(name)) {
             // A DOM focus() on Uno's clipped semantic button is not necessarily
             // a native focus transition. Start with a real Tab even when that
@@ -100,7 +100,17 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
         await button('SQL View'); const before = JSON.stringify((await database()).Tables);
         await edit('SQL statement', 'UPDATE BrowserArchive SET Company=(SELECT Company FROM Customers);');
         await button('Run'); await button('Continue');
-        assert.ok((await page.locator('body').ariaSnapshot()).includes('A scalar subquery returned more than one row.'), 'The action must actually execute and report its scalar error, not be cancelled.');
+        // ShowAsync completes after the native dialog's closing animation and
+        // dispatch; wait for the observable error, not a fixed 250 ms delay.
+        const scalarError = 'A scalar subquery returned more than one row.';
+        let actionSnapshot = '';
+        for (let attempt = 0; attempt < 100; attempt++) {
+            actionSnapshot = await page.locator('body').ariaSnapshot();
+            if (actionSnapshot.includes(scalarError)) break;
+            await page.waitForTimeout(100);
+        }
+        assert.ok(actionSnapshot.includes(scalarError), 'The action must actually execute and report its scalar error, not be cancelled.\n' + actionSnapshot);
+        await page.screenshot({ path: screenshots + '/scalar-action-rollback.png', fullPage: true });
         await save('UPDATE BrowserArchive');
         assert.equal(JSON.stringify((await database()).Tables), before, 'A multirow scalar action must roll back all data edits.'); checks++;
         await edit('SQL statement', sql); await button('Run'); await save('OrderCount');
