@@ -1,0 +1,12 @@
+[
+  {
+    "includeNulls": false,
+    "optimizedSql": "SELECT [s].[ID] FROM [Source data] AS [s] WHERE [s].[Key] IN (SELECT [d].[Key] FROM [Source data] AS [d] WHERE [d].[Key] IS NOT NULL GROUP BY [d].[Key] HAVING COUNT(*) > 1);",
+    "referenceSql": "SELECT [s].[ID] FROM [Source data] AS [s] WHERE [s].[Key] IS NOT NULL AND (SELECT COUNT(*) FROM [Source data] AS [d] WHERE [d].[Key] = [s].[Key]) > 1;"
+  },
+  {
+    "includeNulls": true,
+    "optimizedSql": "SELECT [s].[ID] FROM [Source data] AS [s] WHERE ([s].[Key] IS NULL AND (SELECT COUNT(*) FROM [Source data] AS [d] WHERE [d].[Key] IS NULL) > 1) OR [s].[Key] IN (SELECT [d].[Key] FROM [Source data] AS [d] WHERE [d].[Key] IS NOT NULL GROUP BY [d].[Key] HAVING COUNT(*) > 1);",
+    "referenceSql": "SELECT [s].[ID] FROM [Source data] AS [s] WHERE (SELECT COUNT(*) FROM [Source data] AS [d] WHERE ([d].[Key] = [s].[Key] OR ([d].[Key] IS NULL AND [s].[Key] IS NULL))) > 1;"
+  }
+]

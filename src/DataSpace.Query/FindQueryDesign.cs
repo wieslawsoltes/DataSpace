@@ -38,8 +38,27 @@ public sealed class FindQueryDesign
                 sql = "SELECT " + grouping + ", COUNT(*) AS " + Names.Quote(countName) + " FROM " + from + notNull +
                     " GROUP BY " + grouping + " HAVING COUNT(*) > 1 ORDER BY " + grouping + ";";
             }
+            else if (keys.Count == 1)
+            {
+                // Group the independent key set once instead of running a
+                // correlated COUNT for every source row. Use the executor's
+                // existing bounded per-execution cache and membership index.
+                var left = Q("s", keys[0]);
+                var right = Q("d", keys[0]);
+                var membership = left + " IN (SELECT " + right + " FROM " + Names.Quote(source.Name) +
+                    " AS [d] WHERE " + right + " IS NOT NULL GROUP BY " + right + " HAVING COUNT(*) > 1)";
+                // SQL NULL is not equal to NULL. A separate independent count
+                // preserves the wizard's explicit IncludeNullKeys option.
+                // Test the NULL branch first so duplicate nulls do not probe IN.
+                var predicate = IncludeNullKeys
+                    ? "(" + left + " IS NULL AND (SELECT COUNT(*) FROM " + Names.Quote(source.Name) +
+                        " AS [d] WHERE " + right + " IS NULL) > 1) OR " + membership
+                    : membership;
+                sql = "SELECT " + selected + " FROM " + from + " WHERE " + predicate + ";";
+            }
             else
             {
+                // Composite keys retain the general, bounded correlated path.
                 // No primary key is required: count all matching rows, including
                 // the current row. Null equality is explicit, never ordinary '='.
                 var matches = string.Join(" AND ", keys.Select(f => IncludeNullKeys
