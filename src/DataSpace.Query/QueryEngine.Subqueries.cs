@@ -4,8 +4,7 @@ namespace DataSpace.Query;
 
 public sealed partial class QueryEngine
 {
-    // Every public execution owns its budgets and caches. Parsed ASTs contain no
-    // mutable bindings/results; concurrent calls cannot share data or parameters.
+    // Every execution owns its budgets and caches; cached ASTs contain no data.
     private sealed class QueryExecution(QueryOptions options, QueryStatistics statistics, CancellationToken token)
     {
         public int Depth { get; private set; }
@@ -25,6 +24,12 @@ public sealed partial class QueryEngine
             Depth++; statistics.SubqueryExecutions++;
             statistics.PeakSubqueryDepth = Math.Max(statistics.PeakSubqueryDepth, Depth);
         }
+        public void Compare()
+        {
+            token.ThrowIfCancellationRequested();
+            if (++statistics.SubqueryComparisons > (long)options.MaximumIntermediateRows * 16)
+                throw new DataSpaceException("Subquery comparison-work limit exceeded.");
+        }
         public void Exit() => Depth--;
         public bool Reserve(long bytes)
         {
@@ -33,7 +38,8 @@ public sealed partial class QueryEngine
         }
     }
     private sealed record OuterReference(EvaluationContext Owner, NameExpr Name);
-    private sealed record SubqueryDescription(int Columns, List<OuterReference> References, bool Volatile);
+    private sealed record SubqueryDescription(List<string> Names, List<OuterReference> References, bool Volatile)
+    { public int Columns => Names.Count; }
     private sealed record PreparedSelect(List<(Source Source, TableDefinition Table)> Sources, List<Projection> Projections,
         List<string> Names, EvaluationContext Environment, SubqueryScope Scope, bool Grouped);
 
@@ -50,9 +56,8 @@ public sealed partial class QueryEngine
             throw new DataSpaceException("Duplicate table alias.");
         var projections = Expand(plan.Projections, sources);
         var scope = new SubqueryScope(this, document, parameters, token, path, statistics, execution, depth);
-        // Saved sources can contain time-dependent functions; conservatively avoid
-        // memoizing a subquery which depends on one until volatility propagates
-        // through saved-source metadata without executing the source.
+        // Saved sources may contain time-dependent functions. Do not memoize them
+        // until volatility can be propagated without executing a saved source.
         if (sources.Any(s => !document.Tables.Any(t => Names.Equal(t.Name, s.Source.Table)))) scope.MarkVolatile();
         var environment = new EvaluationContext { Parameters = parameters, Outer = outer, Subqueries = scope.Evaluate };
         var schema = environment.Clone();
@@ -91,14 +96,17 @@ public sealed partial class QueryEngine
         if (query is SelectStatement select)
         {
             var prepared = PrepareSelect(document, select, parameters, token, path, statistics, execution, outer, depth);
-            return new(prepared.Names.Count, prepared.Scope.ExternalReferences(), prepared.Scope.Volatile);
+            return new(prepared.Names, prepared.Scope.ExternalReferences(), prepared.Scope.Volatile);
         }
         if (query is not UnionStatement union) throw new DataSpaceException("A subquery must contain SELECT, not an action statement.");
         var descriptions = union.Queries.Select(q => DescribeSubquery(q, outer, parameters, token, path, statistics, execution, depth, document)).ToList();
         if (descriptions.Any(d => d.Columns != descriptions[0].Columns)) throw new DataSpaceException("UNION branches must have the same number of columns.");
-        // Union ordering is bound again by its executor. Inner SELECT bindings and
-        // all correlations are checked here even when the outer source is empty.
-        return new(descriptions[0].Columns, descriptions.SelectMany(d => d.References).ToList(), descriptions.Any(d => d.Volatile) || union.Order.Any(o => ExpressionAnalysis.IsVolatile(o.Expression)));
+        var orderScope = new SubqueryScope(this, document, parameters, token, path, statistics, execution, depth);
+        var schema = new EvaluationContext { Parameters = parameters, Outer = outer, Subqueries = orderScope.Evaluate };
+        foreach (var name in descriptions[0].Names) schema.Values[name] = null;
+        foreach (var order in union.Order) orderScope.Bind(order.Expression, schema);
+        return new(descriptions[0].Names, descriptions.SelectMany(d => d.References).Concat(orderScope.ExternalReferences()).ToList(),
+            descriptions.Any(d => d.Volatile) || orderScope.Volatile);
     }
 
     private sealed class SubqueryScope(QueryEngine engine, DatabaseDocument document,
@@ -160,9 +168,8 @@ public sealed partial class QueryEngine
                     var plan = expression.Query;
                     if (plan is SelectStatement select)
                     {
-                        // EXISTS needs only cardinality. Do not evaluate projected
-                        // expressions in a simple existence test. Preserve DISTINCT
-                        // with OFFSET and all aggregate/HAVING cardinality rules.
+                        // EXISTS needs only cardinality. Preserve DISTINCT with
+                        // OFFSET and aggregate/HAVING cardinality rules.
                         if (expression.Kind == SubqueryKind.Exists && select.Groups.Count == 0 && select.Having is null &&
                             !select.Projections.Any(p => p.Expression.Aggregate) && select.Offset == 0)
                             plan = select with { Projections = [new(new LiteralExpr(1m))], Order = [], Distinct = false, Limit = select.Limit == 0 ? 0 : 1 };
@@ -191,7 +198,7 @@ public sealed partial class QueryEngine
             var unknown = false;
             foreach (var value in values.Values)
             {
-                token.ThrowIfCancellationRequested(); statistics.SubqueryComparisons++;
+                execution.Compare();
                 if (operand is null || value is null) { unknown = true; continue; }
                 var compare = SqlValue.Compare(operand, value);
                 var match = expression.Comparison switch
@@ -210,8 +217,7 @@ public sealed partial class QueryEngine
     {
         public object?[] Values { get; } = values;
         public bool HasNull { get; } = values.Any(v => v is null);
-        // Includes a conservative allowance for a membership hash table. This is
-        // a cache admission estimate, not a process/GC memory measurement.
+        // Conservative admission estimate including membership storage, not GC memory.
         public long EstimatedBytes { get; } = 128L + values.Sum(v => v is string s ? 96L + s.Length * 2L : 96L);
         private HashSet<object>? _index;
         private int? _family;

@@ -5,7 +5,7 @@ namespace DataSpace.Controls;
 public enum QueryEditorView { Design, Sql, Datasheet }
 
 /// <summary>Reusable query editor with non-destructive SQL/design switching and explicit action confirmation.</summary>
-public sealed class QueryEditorControl : UserControl, IDatabaseEditor
+public sealed partial class QueryEditorControl : UserControl, IDatabaseEditor
 {
     private readonly DatabaseWorkspace _workspace;
     private readonly string _name;
@@ -47,8 +47,10 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
             OfficeVisuals.Button("SQL View", () => TrySwitch(QueryEditorView.Sql), "query", "QuerySqlView"),
             OfficeVisuals.Button("Datasheet View", () => TrySwitch(QueryEditorView.Datasheet), "table", "QueryDatasheetView"),
             OfficeVisuals.Button("Run", async () => await RunAsync(), "query", "RunQuery"),
-            OfficeVisuals.Button("Crosstab Builder", async () => await ShowCrosstabBuilderAsync(), "query", "CrosstabBuilder")); toolbar.Margin = new(8);
-        OfficeVisuals.Add(root, toolbar);
+            OfficeVisuals.Button("Crosstab Builder", async () => await ShowCrosstabBuilderAsync(), "query", "CrosstabBuilder"),
+            OfficeVisuals.Button("Find Duplicates", async () => await ShowFindBuilderAsync(FindQueryKind.Duplicates), "query", "FindDuplicatesBuilder"),
+            OfficeVisuals.Button("Find Unmatched", async () => await ShowFindBuilderAsync(FindQueryKind.Unmatched), "query", "FindUnmatchedBuilder")); toolbar.Margin = new(8);
+        OfficeVisuals.Add(root, EditorVisuals.Scroll(toolbar));
         _sqlView = OfficeVisuals.Grid("Auto,*", "3*,*");
         var sqlLabel = OfficeVisuals.Text("SQL statement", 12, bold: true); sqlLabel.Margin = new(8);
         var paramLabel = OfficeVisuals.Text("Parameters", 12, bold: true); paramLabel.Margin = new(8);

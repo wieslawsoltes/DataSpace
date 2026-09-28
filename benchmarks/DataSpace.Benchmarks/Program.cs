@@ -85,11 +85,37 @@ if (prunedResult.Statistics.SourceValuesRead != 20000 || allColumnsResult.Statis
     throw new Exception("Unexpected wide-scan decoding count.");
 Pair("Wide table TOP 20 / 10,000 records / 64 columns", "Decode all 64 source columns", () => allColumns.Select(wide, wideSql),
     "Decode only the 2 referenced source columns", () => pruned.Select(wide, wideSql));
+// Isolate per-execution scalar caching and membership lookup independently.
+var subqueries = new DatabaseDocument();
+foreach (var (name, count) in new[] { ("Candidates", 500), ("Allowed", 250) })
+{
+    var data = new TableDefinition { Name = name, Fields = [new() { Name = "ID", Type = FieldType.Integer }] };
+    for (var n = 1; n <= count; n++) RecordOperations.Insert(data, new Dictionary<string,string?> { ["ID"] = n.ToString() });
+    subqueries.Tables.Add(data);
+}
+SchemaValidator.Validate(subqueries);
+var uncached = new QueryEngine(new() { EnableSubqueryCache = false }); var cached = new QueryEngine();
+const string scalarSql = "SELECT ID, (SELECT MAX(ID) FROM Allowed) AS Highest FROM Candidates";
+var scalarSlow = uncached.Select(subqueries, scalarSql); var scalarFast = cached.Select(subqueries, scalarSql); SameRows(scalarSlow, scalarFast);
+if (scalarSlow.Statistics.SubqueryExecutions != 500 || scalarFast.Statistics.SubqueryExecutions != 1 || scalarFast.Statistics.SourceRowsRead != 750)
+    throw new Exception("Unexpected scalar subquery work count.");
+Pair("Independent scalar subquery / 500 outer / 250 inner records", "Reexecute the scalar SELECT for each record", () => uncached.Select(subqueries, scalarSql),
+    "Cache the independent scalar result for one execution", () => cached.Select(subqueries, scalarSql));
+const string membershipSql = "SELECT ID FROM Candidates WHERE ID IN (SELECT ID FROM Allowed)";
+var linear = new QueryEngine(new() { EnableMembershipIndexes = false });
+var membershipSlow = linear.Select(subqueries, membershipSql); var membershipFast = cached.Select(subqueries, membershipSql); SameRows(membershipSlow, membershipFast);
+if (membershipSlow.Statistics.SubqueryComparisons != 93875 || membershipFast.Statistics.MembershipIndexProbes != 500 || membershipFast.Statistics.SubqueryComparisons != 0)
+    throw new Exception("Unexpected membership lookup work count.");
+Pair("Cached membership set / 500 probes / 250 values", "Cached values with linear comparison", () => linear.Select(subqueries, membershipSql),
+    "Cached values with homogeneous hash membership", () => cached.Select(subqueries, membershipSql));
 var output = new
 {
     runtime = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
     processorCount = Environment.ProcessorCount, configuration = "Release", measuredAtUtc = DateTime.UtcNow,
     scope = "Managed engine microbenchmarks, not browser or hardware-GPU measurements; no storage I/O. Timings are environment-dependent.",
+    subqueries = new { referenceExecutions = scalarSlow.Statistics.SubqueryExecutions, optimizedExecutions = scalarFast.Statistics.SubqueryExecutions,
+        referenceSourceRows = scalarSlow.Statistics.SourceRowsRead, optimizedSourceRows = scalarFast.Statistics.SourceRowsRead,
+        referenceMembershipComparisons = membershipSlow.Statistics.SubqueryComparisons, optimizedMembershipProbes = membershipFast.Statistics.MembershipIndexProbes },
     columnPruning = new { rows = prunedResult.Statistics.SourceRowsRead, referenceValuesRead = allColumnsResult.Statistics.SourceValuesRead, optimizedValuesRead = prunedResult.Statistics.SourceValuesRead },
     aggregation = new { referenceRowsBuffered = aggregateSlow.Statistics.BufferedAggregateRows, optimizedGroupsRetained = aggregateFast.Statistics.PeakAggregateGroups, optimizedRowsBuffered = aggregateFast.Statistics.BufferedAggregateRows },
     orderedTop = new { candidates = topFast.Statistics.SortCandidateRows, referencePeakRows = topSlow.Statistics.PeakSortRows, optimizedPeakRows = topFast.Statistics.PeakSortRows },

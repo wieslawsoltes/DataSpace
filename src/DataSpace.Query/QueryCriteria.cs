@@ -40,6 +40,8 @@ public static class QueryCriteria
         if (tokens[0].Kind == TokenKind.Word && Names.Equal(tokens[0].Text, "NOT") && tokens.Count > 1 && tokens[1].Text == "(")
             return "NOT (" + Expand(field, text[3..].Trim(), depth + 1) + ")";
         var first = tokens[0];
+        if (first.Kind == TokenKind.Word && (Names.Equal(first.Text, "EXISTS") ||
+            Names.Equal(first.Text, "NOT") && tokens.Count > 1 && Names.Equal(tokens[1].Text, "EXISTS"))) return text;
         if (first.Kind == TokenKind.Symbol && new[] { "=", "!=", "<>", ">", "<", ">=", "<=" }.Contains(first.Text) ||
             first.Kind == TokenKind.Word && new[] { "LIKE", "IN", "BETWEEN", "IS", "NOT" }.Contains(first.Text.ToUpperInvariant()))
             return field + " " + text;
@@ -47,7 +49,7 @@ public static class QueryCriteria
         if (tokens.All(t => t.Kind == TokenKind.Word) && !new[] { "TRUE", "FALSE", "NULL" }.Contains(text.ToUpperInvariant()))
             return field + " = '" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
         var value = SqlText.Parse(text);
-        return value is BinaryExpr { Op: "=" or "!=" or "<>" or "<" or ">" or "<=" or ">=" or "AND" or "OR" or "LIKE" } or NullExpr or InExpr
+        return value is BinaryExpr { Op: "=" or "!=" or "<>" or "<" or ">" or "<=" or ">=" or "AND" or "OR" or "LIKE" } or NullExpr or InExpr or SubqueryExpr { Kind: not SubqueryKind.Scalar }
             ? text : field + " = (" + text + ")";
     }
     private static bool Enclosed(List<Token> tokens)

@@ -9,7 +9,7 @@
 
 DataSpace brings an Office-style ribbon, searchable object navigation, tabbed objects, editable datasheets, graphical queries, form design, report previews and relationship diagrams to a shared .NET codebase. The browser is the actual Uno/Skia application compiled to WebAssembly—not an HTML mockup or a separate front end.
 
-> **0.2.0-preview.2:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
+> **0.2.0-preview.3:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
 
 ## Workspace
 
@@ -18,8 +18,8 @@ DataSpace brings an Office-style ribbon, searchable object navigation, tabbed ob
 | Shell | Red title bar, quick-access commands, grouped ribbon, File backstage, searchable objects, tabs, record navigation and explicit errors. |
 | Tables | Typed fields, insert/update/delete, required/default/primary/unique constraints, atomic undo/redo, detached field design and ordered single/composite index editing. |
 | Datasheets | Visible-cell Skia drawing, lazy row materialization, range selection, keyboard navigation, native text editing, TSV clipboard, sorting, resizing, filtering, debounced search and cached totals. |
-| Queries | SQL and parameter editing, native QBE grid, draggable source cards, join properties, criteria/OR rows, grouping, SELECT SQL round trips and read-only result grids. |
-| Query engine | Streaming SELECT/TOP, transient equality hash joins, supported expressions/aggregation, UNION/UNION ALL, saved-query sources and confirmed atomic action statements including INSERT SELECT. |
+| Queries | SQL and parameter editing, native QBE grid, draggable source cards, join properties, criteria/OR rows, grouping, SELECT SQL round trips, Find Duplicates/Unmatched builders and read-only result grids. |
+| Query engine | Streaming SELECT/TOP, transient equality hash joins, supported expressions/aggregation, UNION/UNION ALL, saved sources, correlated scalar/EXISTS/IN/ANY/ALL subqueries and confirmed atomic actions including INSERT SELECT. |
 | Forms | Bound record entry, text/YesNo controls, navigation, snapped control drag/resize, creation/deletion and geometry/caption properties. |
 | Reports | Table/query source, columns, title/orientation, pagination, zoom and Skia PDF export through the same page renderer. |
 | Relationships and macros | Referential checks/cascades, draggable relationship diagrams, and explicitly invoked ordered workspace macro actions. |
@@ -27,7 +27,9 @@ DataSpace brings an Office-style ribbon, searchable object navigation, tabbed ob
 
 The Northwind-style initial workspace contains demonstration data. Use **File → New** to create a database or **External Data → Text File** to import CSV. In a query, switch between **Design View**, **SQL View** and **Datasheet View**. Compound/action SQL stays in SQL View when it cannot be represented by the SELECT designer. In table Design View, **Indexes** opens the reusable ordered index editor.
 
-Crosstab queries now have a dedicated **Crosstab Builder**, optional fixed column headings and row totals. The engine also supports atomic `SELECT INTO` make-table queries and constraint-index DDL. Streaming groups and bounded ordered `TOP` selection reduce retained query state. See [query analytics](docs/QUERY-ANALYTICS.md) for syntax, reusable APIs and explicit limitations.
+Crosstab queries have a dedicated **Crosstab Builder**, optional fixed column headings and row totals. The engine also supports atomic `SELECT INTO` make-table queries and constraint-index DDL. Streaming groups and bounded ordered `TOP` selection reduce retained query state. See [query analytics](docs/QUERY-ANALYTICS.md) for syntax, reusable APIs and explicit limitations.
+
+**Find Duplicates** and **Find Unmatched** in the query editor generate ordinary saved SQL. Nested queries support lexical correlations and per-execution caching of eligible independent results, with explicit work limits and null semantics. See [subqueries and Find builders](docs/SUBQUERIES.md). Duplicate detail searches remain correlated and may be expensive; summary mode is preferable for large tables.
 
 ## Build and run
 
@@ -55,10 +57,10 @@ Open `http://localhost:8080/`, not `file://`. Desktop execution requires the sel
 | Package | Responsibility |
 | --- | --- |
 | `DataSpace.Core` | Model, typed values, validation, record/schema/index transactions, history, snapshots and document codec. |
-| `DataSpace.Query` | SQL parsing/evaluation, QBE model/translation, query statistics and lazy identity-preserving table views. |
+| `DataSpace.Query` | SQL parsing/evaluation, QBE/Find models, subqueries, query statistics and lazy identity-preserving table views. |
 | `DataSpace.Storage` | CSV, optimistic storage contracts/adapters and asynchronous save-session coordination. |
 | `DataSpace.Rendering` | Independent Skia datasheet, form, relationship, report and icon renderers. |
-| `DataSpace.Controls` | Reusable Uno ribbon/navigation/datasheet, object designers, resource styles and optional full workspace shell. |
+| `DataSpace.Controls` | Reusable Uno ribbon/navigation/datasheet, object designers, query builders, resource styles and optional full workspace shell. |
 
 None depends on `DataSpace.App`. The thin app injects platform file dialogs and browser interop. CI packages all five libraries; the tag workflow attaches packages to GitHub Releases without publishing to NuGet.org. The controls library uses a portable `net10.0` package asset and is compiled through both app heads.
 
@@ -102,7 +104,7 @@ The embedding example uses `DataSpace.Core`, `DataSpace.Storage` and `DataSpace.
 
 ## Performance and verification
 
-Targeted edits avoid whole-database JSON copying, lazy datasheets materialize visible rows, totals are snapshot-cached, and eligible joins use transient hash lookups. [Performance documentation](docs/PERFORMANCE.md) records reproducible managed benchmarks, work counters and remaining limits. Those measurements are not browser/GPU/frame-rate claims.
+Targeted edits avoid whole-database JSON copying, lazy datasheets materialize visible rows, totals are snapshot-cached, and eligible joins use transient hash lookups. Independent subqueries can reuse results within one execution and compatible IN sets use transient membership indexes. [Performance documentation](docs/PERFORMANCE.md) records reproducible managed benchmarks, work counters and remaining limits. Those measurements are not browser/GPU/frame-rate claims.
 
 ```bash
 dotnet run --project benchmarks/DataSpace.Benchmarks/DataSpace.Benchmarks.csproj \
