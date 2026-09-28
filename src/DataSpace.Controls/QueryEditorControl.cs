@@ -76,7 +76,7 @@ public sealed partial class QueryEditorControl : UserControl, IDatabaseEditor
             var builder = new CrosstabBuilderControl(_workspace.Document, definition);
             var errorText = OfficeVisuals.Text("", 12, "9C252A"); errorText.TextWrapping = TextWrapping.Wrap;
             var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Crosstab Query", Content = OfficeVisuals.Stack(errorText, builder),
-                PrimaryButtonText = "Generate SQL", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
+                PrimaryButtonText = "Generate SQL", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.None };
             string? generated = null;
             dialog.PrimaryButtonClick += (_, e) =>
             {

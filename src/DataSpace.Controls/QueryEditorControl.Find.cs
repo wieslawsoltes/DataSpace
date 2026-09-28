@@ -16,7 +16,9 @@ public sealed partial class QueryEditorControl
             var dialog = new ContentDialog { XamlRoot = XamlRoot,
                 Title = kind == FindQueryKind.Duplicates ? "Find Duplicates Query" : "Find Unmatched Query",
                 Content = OfficeVisuals.Stack(errorText, builder), PrimaryButtonText = "Generate SQL", CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Close };
+                DefaultButton = ContentDialogButton.None };
+            // A rejected primary click must not fall through to a default Close
+            // action when Enter bubbles through the native ContentDialog.
             string? generated = null;
             dialog.PrimaryButtonClick += (_, e) =>
             {
