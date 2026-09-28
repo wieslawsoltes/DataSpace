@@ -2,6 +2,11 @@
   "name": "dataspace-browser-checks",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node browser-smoke.mjs" },
-  "devDependencies": { "playwright": "1.55.1" }
+  "scripts": {
+    "test": "node browser-smoke.mjs",
+    "test:unit": "node --test native-dialog-actions.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.55.1"
+  }
 }

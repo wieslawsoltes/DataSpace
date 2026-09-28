@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { activateDialogButton } from './native-dialog-actions.mjs';
 
 /** Exercises actual native Uno builders and SQL results; no app command/test backdoor. */
 export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
@@ -8,29 +9,19 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
     async function button(name, last = false) {
         const matches = page.getByRole('button', { name, exact: true });
         const target = last ? matches.last() : matches.first();
-        if (name === 'Continue') {
-            // The confirmation defaults to Cancel. Use real pointer input for
-            // this destructive-action test instead of treating the accessibility
-            // proxy's DOM focus as the native ContentDialog focus state.
-            const box = await target.boundingBox();
-            const viewport = page.viewportSize();
-            assert.ok(box && viewport && box.width > 8 && box.height > 8 &&
-                box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width &&
-                box.y + box.height <= viewport.height, 'Continue must have visible, in-viewport native bounds.');
-            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { delay: 90 });
-        } else if (['Generate SQL', 'Cancel'].includes(name)) {
-            // A DOM focus() on Uno's clipped semantic button is not necessarily
-            // a native focus transition. Start with a real Tab even when that
-            // proxy already looks focused; then activate the native target.
-            await page.keyboard.press('Tab');
-            for (let i = 0; i < 100; i++) {
-                if (await target.evaluate(element => document.activeElement === element)) break;
-                await page.keyboard.press('Tab'); await page.waitForTimeout(50);
-            }
-            assert.ok(await target.evaluate(element => document.activeElement === element), name + ' must be keyboard reachable.');
-            await page.keyboard.press('Enter');
+        if (['Generate SQL', 'Cancel', 'Continue'].includes(name)) {
+            await activateDialogButton(page, target, name);
         } else await target.press('Enter');
         await page.waitForTimeout(250);
+    }
+    async function accessibleMessage(pattern) {
+        let snapshot = '';
+        for (let i = 0; i < 50; i++) {
+            snapshot = await page.locator('body').ariaSnapshot();
+            if (pattern.test(snapshot)) return;
+            await page.waitForTimeout(100);
+        }
+        assert.match(snapshot, pattern, 'Validation must be exposed to assistive technology, not only drawn.');
     }
     async function edit(name, value) {
         const input = peer('textbox', name); await input.focus(); await page.waitForTimeout(150);
@@ -74,7 +65,7 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
         assert.equal(await peer('textbox', 'SQL statement').inputValue(), previous); checks++;
         await button('Find Duplicates'); await button('Generate SQL');
         assert.ok(await peer('checkbox', 'Match field Country').count(), 'An empty selection must retain the builder for correction.');
-        assert.match(await page.locator('body').ariaSnapshot(), /Select 1.*16 fields/); checks++;
+        await accessibleMessage(/Select 1.*16 fields/); checks++;
         await toggle('Match field Country', true);
         await page.screenshot({ path: screenshots + '/find-duplicates-builder.png', fullPage: true });
         await button('Generate SQL'); assert.ok((await peer('textbox', 'SQL statement').inputValue()).includes('HAVING COUNT(*) > 1')); checks++;
@@ -83,7 +74,11 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
         await page.screenshot({ path: screenshots + '/find-duplicates-results.png', fullPage: true });
         await button('Find Duplicates'); await toggle('Match field Country', true);
         await toggle('Show duplicate groups and counts', false); await toggle('Output field ID', true);
-        await button('Generate SQL'); await button('Run'); const detail = await csv(); assert.equal(detail.length, 12); checks++;
+        await button('Generate SQL');
+        const detailSql = await peer('textbox', 'SQL statement').inputValue();
+        assert.ok(detailSql.includes(' IN (SELECT ') && detailSql.includes('GROUP BY [d].[Country]'),
+            'Single-field detail authoring must use the grouped duplicate-key set.');
+        await button('Run'); const detail = await csv(); assert.equal(detail.length, 12); checks++;
         await button('Find Unmatched'); await toggle('Match field ID', true); await toggle('Output field ID', true);
         // Defaults: Customers against Products, whose IDs are 1..12.
         await page.screenshot({ path: screenshots + '/find-unmatched-builder.png', fullPage: true });
@@ -99,7 +94,16 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
         await page.screenshot({ path: screenshots + '/correlated-subquery-results.png', fullPage: true });
         await button('SQL View'); const before = JSON.stringify((await database()).Tables);
         await edit('SQL statement', 'UPDATE BrowserArchive SET Company=(SELECT Company FROM Customers);');
+        await button('Run');
+        await peer('button', 'Continue').waitFor({ state: 'attached' });
+        // Default Enter must cancel. Do not change confirmation defaults merely
+        // to make a generated action query easier to execute from the test.
+        await page.keyboard.press('Enter');
+        await peer('button', 'Continue').waitFor({ state: 'detached' });
+        await save('UPDATE BrowserArchive');
+        assert.equal(JSON.stringify((await database()).Tables), before, 'Default Enter must not execute an action query.'); checks++;
         await button('Run'); await button('Continue');
+        await peer('button', 'Continue').waitFor({ state: 'detached' });
         // ShowAsync completes after the native dialog's closing animation and
         // dispatch; wait for the observable error, not a fixed 250 ms delay.
         const scalarError = 'A scalar subquery returned more than one row.';
