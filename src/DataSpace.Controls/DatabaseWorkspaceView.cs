@@ -13,7 +13,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     private readonly ContentControl _content = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
     private readonly TextBlock _title = OfficeVisuals.Text("DataSpace", 13, "FFFFFF");
     private readonly TextBlock _status = OfficeVisuals.Text("Ready", 11, "555555");
-    private readonly TextBlock _error = OfficeVisuals.Text("", 12, "9C252A");
+    private readonly ValidationMessageControl _error = new();
     private readonly Border _errorBar;
     private readonly Border _backstage = new() { Visibility = Visibility.Collapsed };
     private readonly Grid _body = OfficeVisuals.Grid("*", "220,*");
@@ -45,7 +45,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
         _title.HorizontalAlignment = HorizontalAlignment.Center; OfficeVisuals.Add(titlebar, _title, column: 1);
         var edition = OfficeVisuals.Text("Local database workspace  ", 11, "FFFFFF"); edition.HorizontalAlignment = HorizontalAlignment.Right; OfficeVisuals.Add(titlebar, edition, column: 2);
         OfficeVisuals.Add(root, titlebar); _ribbon.SetTabs(OfficeCommandCatalog.Create()); _ribbon.CommandInvoked += Execute; OfficeVisuals.Add(root, _ribbon, 1);
-        _error.TextWrapping = TextWrapping.Wrap; _error.Margin = new(10, 7, 10, 7);
+        _error.Margin = new(10, 7, 10, 7);
         _errorBar = OfficeVisuals.Border(_error, "FFF1DF", "E9CDA0", new(0, 0, 0, 1)); _errorBar.Visibility = Visibility.Collapsed; OfficeVisuals.Add(root, _errorBar, 2);
         var documents = OfficeVisuals.Grid("33,*,Auto"); OfficeVisuals.Add(documents, _tabs); OfficeVisuals.Add(documents, _content, 1); OfficeVisuals.Add(documents, _navigator, 2);
         OfficeVisuals.Add(_body, _navigation); OfficeVisuals.Add(_body, documents, column: 1);

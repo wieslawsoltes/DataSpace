@@ -14,7 +14,8 @@ public sealed partial class QueryEngine
         return table.Fields.Where(field => names.Contains(field.Name) || names.Contains(alias + "." + field.Name)).ToArray();
     }
     private IEnumerable<EvaluationContext> SourceRows(TableDefinition table, string alias, IReadOnlyDictionary<string, object?> parameters,
-        CancellationToken token, QueryStatistics statistics, bool reuseContext = false, IReadOnlyList<FieldDefinition>? selectedFields = null)
+        CancellationToken token, QueryStatistics statistics, bool reuseContext = false, IReadOnlyList<FieldDefinition>? selectedFields = null,
+        EvaluationContext? environment = null, QueryExecution? execution = null)
     {
         var count = 0;
         if (!reuseContext && selectedFields is null)
@@ -22,9 +23,9 @@ public sealed partial class QueryEngine
             // Retain the unoptimized path for differential tests and joined inputs.
             foreach (var record in table.Records)
             {
-                token.ThrowIfCancellationRequested(); CheckSize(++count); statistics.SourceRowsRead++; statistics.SourceContextsCreated++;
+                token.ThrowIfCancellationRequested(); CheckSize(++count); statistics.SourceRowsRead++; execution?.ReadRow(); statistics.SourceContextsCreated++;
                 statistics.SourceValuesRead += table.Fields.Count;
-                yield return AddSource(new EvaluationContext { Parameters = parameters }, table, alias, record);
+                yield return AddSource((environment?.Clone() ?? new EvaluationContext { Parameters = parameters }), table, alias, record);
             }
             yield break;
         }
@@ -32,12 +33,13 @@ public sealed partial class QueryEngine
         // and reference groups retain rows and must receive distinct contexts.
         var fields = (selectedFields ?? table.Fields).Select(field => (Field: field, Qualified: alias + "." + field.Name)).ToArray();
         EvaluationContext? shared = null;
-        if (reuseContext) { shared = new EvaluationContext { Parameters = parameters }; statistics.SourceContextsCreated++; }
+        if (reuseContext) { shared = (environment?.Clone() ?? new EvaluationContext { Parameters = parameters }); statistics.SourceContextsCreated++; }
         foreach (var record in table.Records)
         {
-            token.ThrowIfCancellationRequested(); CheckSize(++count); statistics.SourceRowsRead++;
-            var context = shared ?? new EvaluationContext { Parameters = parameters };
+            token.ThrowIfCancellationRequested(); CheckSize(++count); statistics.SourceRowsRead++; execution?.ReadRow();
+            var context = shared ?? (environment?.Clone() ?? new EvaluationContext { Parameters = parameters });
             if (shared is null) statistics.SourceContextsCreated++;
+            context.Aliases.Add(alias);
             foreach (var (field, qualified) in fields)
             {
                 var value = FieldValues.Parse(field, record[field.Name]); context.Values[field.Name] = value; context.Values[qualified] = value;

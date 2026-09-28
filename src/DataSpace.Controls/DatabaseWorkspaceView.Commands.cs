@@ -69,7 +69,7 @@ public sealed partial class DatabaseWorkspaceView
     {
         var tableName = SourceTable(); var table = Workspace.Document.Table(tableName);
         var inputs = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
-        var panel = new StackPanel { Spacing = 8 }; var error = OfficeVisuals.Text("", 12, "9C252A"); error.TextWrapping = TextWrapping.Wrap; panel.Children.Add(error);
+        var panel = new StackPanel { Spacing = 8 }; var error = new ValidationMessageControl(); panel.Children.Add(error);
         foreach (var field in table.Fields.Where(f => f.Type is not FieldType.AutoNumber and not FieldType.Guid))
         {
             var input = OfficeVisuals.Input(field.DefaultValue ?? ""); inputs.Add(field.Name, input); EditorVisuals.Labeled(panel, field.DisplayName + (field.Required ? " *" : ""), input);

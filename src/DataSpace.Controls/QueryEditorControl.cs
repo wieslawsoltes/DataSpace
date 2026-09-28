@@ -5,7 +5,7 @@ namespace DataSpace.Controls;
 public enum QueryEditorView { Design, Sql, Datasheet }
 
 /// <summary>Reusable query editor with non-destructive SQL/design switching and explicit action confirmation.</summary>
-public sealed class QueryEditorControl : UserControl, IDatabaseEditor
+public sealed partial class QueryEditorControl : UserControl, IDatabaseEditor
 {
     private readonly DatabaseWorkspace _workspace;
     private readonly string _name;
@@ -32,6 +32,8 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
     public QueryEditorControl(DatabaseWorkspace workspace, string name, bool design = false)
     {
         _workspace = workspace; _name = name;
+        _status.RegisterPropertyChangedCallback(TextBlock.TextProperty,
+            (element, _) => AutomationProperties.SetName(element, ((TextBlock)element).Text));
         var query = workspace.Document.Queries.First(q => Names.Equal(q.Name, name));
         _baselineSql = query.Sql; _state = _baselineState = query.DesignerState;
         _savedParameters = new(query.Parameters, StringComparer.OrdinalIgnoreCase);
@@ -47,8 +49,10 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
             OfficeVisuals.Button("SQL View", () => TrySwitch(QueryEditorView.Sql), "query", "QuerySqlView"),
             OfficeVisuals.Button("Datasheet View", () => TrySwitch(QueryEditorView.Datasheet), "table", "QueryDatasheetView"),
             OfficeVisuals.Button("Run", async () => await RunAsync(), "query", "RunQuery"),
-            OfficeVisuals.Button("Crosstab Builder", async () => await ShowCrosstabBuilderAsync(), "query", "CrosstabBuilder")); toolbar.Margin = new(8);
-        OfficeVisuals.Add(root, toolbar);
+            OfficeVisuals.Button("Crosstab Builder", async () => await ShowCrosstabBuilderAsync(), "query", "CrosstabBuilder"),
+            OfficeVisuals.Button("Find Duplicates", async () => await ShowFindBuilderAsync(FindQueryKind.Duplicates), "query", "FindDuplicatesBuilder"),
+            OfficeVisuals.Button("Find Unmatched", async () => await ShowFindBuilderAsync(FindQueryKind.Unmatched), "query", "FindUnmatchedBuilder")); toolbar.Margin = new(8);
+        OfficeVisuals.Add(root, EditorVisuals.Scroll(toolbar));
         _sqlView = OfficeVisuals.Grid("Auto,*", "3*,*");
         var sqlLabel = OfficeVisuals.Text("SQL statement", 12, bold: true); sqlLabel.Margin = new(8);
         var paramLabel = OfficeVisuals.Text("Parameters", 12, bold: true); paramLabel.Margin = new(8);
@@ -72,14 +76,14 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
             SynchronizeDesign(); CrosstabDesign? definition = null;
             try { definition = CrosstabDesign.FromSql(_sql.Text); } catch (DataSpaceException) { /* New builder draft; SQL is unchanged until Generate. */ }
             var builder = new CrosstabBuilderControl(_workspace.Document, definition);
-            var errorText = OfficeVisuals.Text("", 12, "9C252A"); errorText.TextWrapping = TextWrapping.Wrap;
+            var errorText = new ValidationMessageControl();
             var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Crosstab Query", Content = OfficeVisuals.Stack(errorText, builder),
-                PrimaryButtonText = "Generate SQL", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
+                PrimaryButtonText = "Generate SQL", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.None };
             string? generated = null;
             dialog.PrimaryButtonClick += (_, e) =>
             {
                 try { generated = builder.ToSql(); }
-                catch (Exception error) { e.Cancel = true; errorText.Text = error.Message; }
+                catch (Exception error) { e.Cancel = true; generated = null; errorText.Text = error.Message; }
             };
             if (await dialog.ShowAsync() != ContentDialogResult.Primary || generated is null || _disposed) return;
             _designer?.Dispose(); _designer = null; _state = null; _sql.Text = generated;
@@ -88,7 +92,7 @@ public sealed class QueryEditorControl : UserControl, IDatabaseEditor
         catch (Exception error) { ShowError(error.Message); }
         finally { _dialogOpen = false; }
     }
-    private void ShowError(string message) { _status.Text = message; Error?.Invoke(message); }
+    private void ShowError(string message) { _status.Text = message; AutomationProperties.SetName(_status, message); Error?.Invoke(message); }
     private void TrySwitch(QueryEditorView view) { try { SwitchView(view); } catch (Exception error) { ShowError(error.Message); } }
     public void SwitchView(QueryEditorView view)
     {

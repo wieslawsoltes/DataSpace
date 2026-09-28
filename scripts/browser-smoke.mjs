@@ -1,3 +1,4 @@
+import { subqueryBrowserChecks } from './subquery-browser-checks.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
@@ -99,6 +100,7 @@ try {
         await page.screenshot({ path: screenshots + '/after-reload.png', fullPage: true });
         checks += await queryBrowserChecks(page, baseURL, screenshots, ready);
         checks += await crosstabBrowserChecks(page, baseURL, screenshots, ready);
+        checks += await subqueryBrowserChecks(page, baseURL, screenshots, ready);
         assert.deepEqual(failures, [], 'No unhandled browser exceptions or missing runtime assets.'); checks++;
         console.log(`PASS: ${checks} browser checks (IndexedDB races, corruption, Unicode, Uno startup, cell edit/save/reload and visual query workflows).`);
     } finally {

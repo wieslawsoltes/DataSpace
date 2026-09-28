@@ -7,7 +7,7 @@
     <ApplicationTitle>DataSpace</ApplicationTitle>
     <ApplicationId>org.dataspace.app</ApplicationId>
     <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
-    <ApplicationVersion>3</ApplicationVersion>
+    <ApplicationVersion>4</ApplicationVersion>
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <WasmShellWebAppBasePath>./</WasmShellWebAppBasePath>

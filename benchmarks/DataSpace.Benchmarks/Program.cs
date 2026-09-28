@@ -85,11 +85,85 @@ if (prunedResult.Statistics.SourceValuesRead != 20000 || allColumnsResult.Statis
     throw new Exception("Unexpected wide-scan decoding count.");
 Pair("Wide table TOP 20 / 10,000 records / 64 columns", "Decode all 64 source columns", () => allColumns.Select(wide, wideSql),
     "Decode only the 2 referenced source columns", () => pruned.Select(wide, wideSql));
+// Isolate per-execution scalar caching and membership lookup independently.
+var subqueries = new DatabaseDocument();
+foreach (var (name, count) in new[] { ("Candidates", 500), ("Allowed", 250) })
+{
+    var data = new TableDefinition { Name = name, Fields = [new() { Name = "ID", Type = FieldType.Integer }] };
+    for (var n = 1; n <= count; n++) RecordOperations.Insert(data, new Dictionary<string,string?> { ["ID"] = n.ToString() });
+    subqueries.Tables.Add(data);
+}
+SchemaValidator.Validate(subqueries);
+var uncached = new QueryEngine(new() { EnableSubqueryCache = false }); var cached = new QueryEngine();
+const string scalarSql = "SELECT ID, (SELECT MAX(ID) FROM Allowed) AS Highest FROM Candidates";
+var scalarSlow = uncached.Select(subqueries, scalarSql); var scalarFast = cached.Select(subqueries, scalarSql); SameRows(scalarSlow, scalarFast);
+if (scalarSlow.Statistics.SubqueryExecutions != 500 || scalarFast.Statistics.SubqueryExecutions != 1 || scalarFast.Statistics.SourceRowsRead != 750)
+    throw new Exception("Unexpected scalar subquery work count.");
+Pair("Independent scalar subquery / 500 outer / 250 inner records", "Reexecute the scalar SELECT for each record", () => uncached.Select(subqueries, scalarSql),
+    "Cache the independent scalar result for one execution", () => cached.Select(subqueries, scalarSql));
+const string membershipSql = "SELECT ID FROM Candidates WHERE ID IN (SELECT ID FROM Allowed)";
+var linear = new QueryEngine(new() { EnableMembershipIndexes = false });
+var membershipSlow = linear.Select(subqueries, membershipSql); var membershipFast = cached.Select(subqueries, membershipSql); SameRows(membershipSlow, membershipFast);
+if (membershipSlow.Statistics.SubqueryComparisons != 93875 || membershipFast.Statistics.MembershipIndexProbes != 500 || membershipFast.Statistics.SubqueryComparisons != 0)
+    throw new Exception("Unexpected membership lookup work count.");
+Pair("Cached membership set / 500 probes / 250 values", "Cached values with linear comparison", () => linear.Select(subqueries, membershipSql),
+    "Cached values with homogeneous hash membership", () => cached.Select(subqueries, membershipSql));
+// Isolate repeated-correlation memoization; all other execution switches match.
+var repeated = new DatabaseDocument();
+foreach (var (name, count) in new[] { ("Repeated", 500), ("Related", 250) })
+{
+    var data = new TableDefinition { Name = name, Fields = [new() { Name = "ID", Type = FieldType.Integer }, new() { Name = "K", Type = FieldType.Integer }] };
+    for (var n = 0; n < count; n++) RecordOperations.Insert(data,
+        new Dictionary<string,string?> { ["ID"] = n.ToString(), ["K"] = (n % 8).ToString() });
+    repeated.Tables.Add(data);
+}
+SchemaValidator.Validate(repeated);
+const string correlatedSql = "SELECT c.ID,(SELECT Count(*) FROM Related r WHERE r.K=c.K) AS N FROM Repeated c ORDER BY c.ID";
+var noCorrelationCache = new QueryEngine(new() { EnableSubqueryCache = false });
+var correlationSlow = noCorrelationCache.Select(repeated, correlatedSql);
+var correlationFast = cached.Select(repeated, correlatedSql); SameRows(correlationSlow, correlationFast);
+if (correlationSlow.Statistics.SubqueryExecutions != 500 || correlationFast.Statistics.SubqueryExecutions != 8 ||
+    correlationFast.Statistics.SubqueryCacheHits != 492 || correlationFast.Statistics.SourceRowsRead != 2500)
+    throw new Exception("Unexpected repeated-correlation work count.");
+Pair("Repeated correlation / 500 outer / 250 inner / 8 keys", "Reexecute correlated aggregate for each outer row",
+    () => noCorrelationCache.Select(repeated, correlatedSql), "Reuse identical bound outer-reference tuples",
+    () => cached.Select(repeated, correlatedSql));
+// Compare SQL shapes without changing executor options. Both are read-only and
+// result-equivalent; the new authoring strategy removes correlated COUNTs even with repeated-key caching.
+var duplicates = new DatabaseDocument();
+var duplicateTable = new TableDefinition { Name = "DuplicateRows", Fields = [
+    new() { Name = "ID", Type = FieldType.Integer }, new() { Name = "Key" } ] };
+for (var i = 0; i < 1000; i++) RecordOperations.Insert(duplicateTable, new Dictionary<string, string?>
+    { ["ID"] = i.ToString(), ["Key"] = i % 19 == 0 ? null : "Group " + i % 31 });
+duplicates.Tables.Add(duplicateTable); SchemaValidator.Validate(duplicates);
+var duplicateDesign = new FindQueryDesign { Source = "DuplicateRows", MatchFields = ["Key"],
+    OutputFields = ["ID"], SummaryOnly = false, IncludeNullKeys = true };
+var duplicateSql = duplicateDesign.ToSql(duplicates);
+const string duplicateReferenceSql = "SELECT s.ID FROM DuplicateRows s WHERE (SELECT COUNT(*) FROM DuplicateRows d WHERE d.[Key]=s.[Key] OR (d.[Key] IS NULL AND s.[Key] IS NULL))>1";
+var duplicateEngine = new QueryEngine();
+var duplicateFast = duplicateEngine.Select(duplicates, duplicateSql);
+var duplicateSlow = duplicateEngine.Select(duplicates, duplicateReferenceSql);
+SameRows(duplicateFast, duplicateSlow);
+if (duplicateFast.Statistics.SubqueryExecutions != 2 || duplicateFast.Statistics.SourceRowsRead != 3000 ||
+    duplicateSlow.Statistics.SubqueryExecutions != 32 || duplicateSlow.Statistics.SourceRowsRead != 33000)
+    throw new Exception("Unexpected duplicate-detail query work count.");
+Pair("Duplicate details / 1,000 records / one text key including nulls", "Correlated counts with repeated-key cache enabled",
+    () => duplicateEngine.Select(duplicates, duplicateReferenceSql), "Independent grouped membership and null count",
+    () => duplicateEngine.Select(duplicates, duplicateSql), 3);
 var output = new
 {
     runtime = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
     processorCount = Environment.ProcessorCount, configuration = "Release", measuredAtUtc = DateTime.UtcNow,
     scope = "Managed engine microbenchmarks, not browser or hardware-GPU measurements; no storage I/O. Timings are environment-dependent.",
+    duplicateDetails = new { referenceExecutions = duplicateSlow.Statistics.SubqueryExecutions,
+        optimizedExecutions = duplicateFast.Statistics.SubqueryExecutions,
+        referenceSourceRows = duplicateSlow.Statistics.SourceRowsRead, optimizedSourceRows = duplicateFast.Statistics.SourceRowsRead },
+    subqueries = new { referenceExecutions = scalarSlow.Statistics.SubqueryExecutions, optimizedExecutions = scalarFast.Statistics.SubqueryExecutions,
+        referenceSourceRows = scalarSlow.Statistics.SourceRowsRead, optimizedSourceRows = scalarFast.Statistics.SourceRowsRead,
+        referenceMembershipComparisons = membershipSlow.Statistics.SubqueryComparisons, optimizedMembershipProbes = membershipFast.Statistics.MembershipIndexProbes },
+    correlations = new { referenceExecutions = correlationSlow.Statistics.SubqueryExecutions, optimizedExecutions = correlationFast.Statistics.SubqueryExecutions,
+        cacheHits = correlationFast.Statistics.SubqueryCacheHits, referenceSourceRows = correlationSlow.Statistics.SourceRowsRead,
+        optimizedSourceRows = correlationFast.Statistics.SourceRowsRead, admittedBytes = correlationFast.Statistics.SubqueryCacheBytes },
     columnPruning = new { rows = prunedResult.Statistics.SourceRowsRead, referenceValuesRead = allColumnsResult.Statistics.SourceValuesRead, optimizedValuesRead = prunedResult.Statistics.SourceValuesRead },
     aggregation = new { referenceRowsBuffered = aggregateSlow.Statistics.BufferedAggregateRows, optimizedGroupsRetained = aggregateFast.Statistics.PeakAggregateGroups, optimizedRowsBuffered = aggregateFast.Statistics.BufferedAggregateRows },
     orderedTop = new { candidates = topFast.Statistics.SortCandidateRows, referencePeakRows = topSlow.Statistics.PeakSortRows, optimizedPeakRows = topFast.Statistics.PeakSortRows },

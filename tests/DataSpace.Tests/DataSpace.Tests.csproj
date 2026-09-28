@@ -8,4 +8,7 @@
     <ProjectReference Include="../../src/DataSpace.Query/DataSpace.Query.csproj" />
     <ProjectReference Include="../../src/DataSpace.Storage/DataSpace.Storage.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures/duplicate-detail-sql.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

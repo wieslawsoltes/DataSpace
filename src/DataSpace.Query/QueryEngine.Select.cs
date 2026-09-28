@@ -5,15 +5,19 @@ namespace DataSpace.Query;
 public sealed partial class QueryEngine
 {
     private QueryResult Read(DatabaseDocument document, Statement plan, IReadOnlyDictionary<string, object?> parameters,
-        CancellationToken token, HashSet<string> path, QueryStatistics statistics) => plan switch
+        CancellationToken token, HashSet<string> path, QueryStatistics statistics, QueryExecution? execution = null, EvaluationContext? outer = null)
     {
-        SelectStatement select => ExecuteSelect(document, select, parameters, token, path, statistics),
-        TransformStatement transform => ExecuteTransform(document, transform, parameters, token, path, statistics),
-        UnionStatement union => ExecuteUnion(document, union, parameters, token, path, statistics),
-        _ => throw new DataSpaceException("A record source must be a SELECT, UNION or TRANSFORM query.")
-    };
+        execution ??= new(Options, statistics, token);
+        return plan switch
+        {
+            SelectStatement select => ExecuteSelect(document, select, parameters, token, path, statistics, execution, outer),
+            TransformStatement transform => ExecuteTransform(document, transform, parameters, token, path, statistics, execution, outer),
+            UnionStatement union => ExecuteUnion(document, union, parameters, token, path, statistics, execution, outer),
+            _ => throw new DataSpaceException("A record source must be a SELECT, UNION or TRANSFORM query.")
+        };
+    }
     private TableDefinition ResolveSource(DatabaseDocument document, string name, IReadOnlyDictionary<string, object?> parameters,
-        CancellationToken token, HashSet<string> path, QueryStatistics statistics)
+        CancellationToken token, HashSet<string> path, QueryStatistics statistics, QueryExecution? execution = null)
     {
         var table = document.Tables.FirstOrDefault(t => Names.Equal(t.Name, name)); if (table is not null) return table;
         var query = document.Queries.FirstOrDefault(q => Names.Equal(q.Name, name)) ?? throw new DataSpaceException($"Table or query '{name}' does not exist.");
@@ -22,34 +26,17 @@ public sealed partial class QueryEngine
         {
             var args = query.Parameters.ToDictionary(p => p.Key, p => (object?)p.Value, StringComparer.OrdinalIgnoreCase);
             foreach (var pair in parameters) args[pair.Key] = pair.Value;
-            var result = Read(document, Parse(query.Sql), args, token, path, statistics);
+            var result = Read(document, Parse(query.Sql), args, token, path, statistics, execution);
             return new() { Name = query.Name, Fields = result.Fields, Records = result.Records };
         }
         finally { path.Remove(query.Name); }
     }
     private QueryResult ExecuteSelect(DatabaseDocument document, SelectStatement plan, IReadOnlyDictionary<string, object?> parameters,
-        CancellationToken token, HashSet<string> path, QueryStatistics statistics)
+        CancellationToken token, HashSet<string> path, QueryStatistics statistics, QueryExecution execution, EvaluationContext? outer = null)
     {
-        token.ThrowIfCancellationRequested();
-        var sources = new List<(Source Source, TableDefinition Table)>();
-        if (plan.Source is { } from) sources.Add((from, ResolveSource(document, from.Table, parameters, token, path, statistics)));
-        foreach (var join in plan.Joins) sources.Add((join.Source, ResolveSource(document, join.Source.Table, parameters, token, path, statistics)));
-        if (sources.Select(s => s.Source.Alias).Distinct(StringComparer.OrdinalIgnoreCase).Count() != sources.Count) throw new DataSpaceException("Duplicate table alias.");
-        var projections = Expand(plan.Projections, sources);
-        var schema = new EvaluationContext { Parameters = parameters };
-        foreach (var source in sources) schema = AddSource(schema, source.Table, source.Source.Alias, null);
-        void Bind(Expr expression, EvaluationContext context) { foreach (var name in ExpressionAnalysis.Names(expression)) context.Resolve(name.Name, name.Parameter); }
-        foreach (var projection in projections) Bind(projection.Expression, schema);
-        if (plan.Where is { } predicate)
-        { if (predicate.Aggregate) throw new DataSpaceException("Aggregates belong in HAVING, not WHERE."); Bind(predicate, schema); }
-        foreach (var group in plan.Groups) { if (group.Aggregate) throw new DataSpaceException("GROUP BY cannot contain aggregates."); Bind(group, schema); }
-        foreach (var join in plan.Joins)
-        { if (join.Condition is { } on) { if (on.Aggregate) throw new DataSpaceException("Join conditions cannot contain aggregates."); Bind(on, schema); } }
-        var names = OutputNames(projections);
-        var aliases = schema.Clone(); foreach (var name in names) { aliases.Values[name] = null; aliases.Ambiguous.Remove(name); }
-        if (plan.Having is { } h) Bind(h, aliases);
-        foreach (var order in plan.Order) Bind(order.Expression, aliases);
-        var grouped = plan.Groups.Count > 0 || projections.Any(p => p.Expression.Aggregate) || plan.Having?.Aggregate == true;
+        var prepared = PrepareSelect(document, plan, parameters, token, path, statistics, execution, outer, execution.Depth);
+        var sources = prepared.Sources; var projections = prepared.Projections; var names = prepared.Names;
+        var environment = prepared.Environment; var scope = prepared.Scope; var grouped = prepared.Grouped;
         var reuse = Options.EnableReusableRowContexts && plan.Joins.Count == 0 && (!grouped || Options.EnableStreamingAggregates);
         // Bind every name above before choosing the narrower physical scan. Result
         // aliases in ORDER BY/HAVING may retain extra fields, but never omit inputs.
@@ -57,27 +44,26 @@ public sealed partial class QueryEngine
         if (plan.Where is not null) scanExpressions = scanExpressions.Append(plan.Where);
         if (plan.Having is not null) scanExpressions = scanExpressions.Append(plan.Having);
         var scanFields = plan.Source is not null && plan.Joins.Count == 0
-            ? PrunedFields(sources[0].Table, sources[0].Source.Alias, scanExpressions) : null;
-        IEnumerable<EvaluationContext> rows = plan.Source is null ? [new EvaluationContext { Parameters = parameters }]
-            : SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics, reuse, scanFields);
+            ? PrunedFields(sources[0].Table, sources[0].Source.Alias, scanExpressions.Concat(scope.ScanReferences)) : null;
+        IEnumerable<EvaluationContext> rows = plan.Source is null ? [environment.Clone()]
+            : SourceRows(sources[0].Table, sources[0].Source.Alias, parameters, token, statistics, reuse, scanFields, environment, execution);
         for (var index = 0; index < plan.Joins.Count; index++)
-            rows = JoinRows(rows, plan.Joins[index], sources[index + 1].Table, sources.Take(index + 1).ToList(), parameters, token, statistics);
+            rows = JoinRows(rows, plan.Joins[index], sources[index + 1].Table, sources.Take(index + 1).ToList(), parameters, token, statistics, execution);
         if (plan.Where is { } where) rows = rows.Where(row => { token.ThrowIfCancellationRequested(); return SqlValue.Truth(where.Eval(row)); });
         if (grouped)
         {
-            if (projections.Any(p => !p.Expression.GroupSafe(plan.Groups))) throw new DataSpaceException("Every selected field must be grouped or aggregated.");
-            if (Options.EnableStreamingAggregates) rows = StreamGroups(rows, plan, projections, parameters, token, statistics);
+            if (Options.EnableStreamingAggregates) rows = StreamGroups(rows, plan, projections, parameters, token, statistics, environment);
             else
             {
-            var buffered = rows.ToList(); CheckSize(buffered.Count);
-            statistics.BufferedAggregateRows = Math.Max(statistics.BufferedAggregateRows, buffered.Count);
-            if (plan.Groups.Count == 0)
-            {
-                var context = buffered.FirstOrDefault()?.Clone() ?? new EvaluationContext { Parameters = parameters };
-                context.Group = buffered; rows = [context];
-            }
-            else rows = buffered.GroupBy(row => { token.ThrowIfCancellationRequested(); return SqlValue.Key(plan.Groups.Select(g => g.Eval(row))); })
-                .Select(group => { var context = group.First().Clone(); context.Group = group.ToList(); return context; });
+                var buffered = rows.ToList(); CheckSize(buffered.Count);
+                statistics.BufferedAggregateRows = Math.Max(statistics.BufferedAggregateRows, buffered.Count);
+                if (plan.Groups.Count == 0)
+                {
+                    var context = buffered.FirstOrDefault()?.Clone() ?? environment.Clone();
+                    context.Group = buffered; rows = [context];
+                }
+                else rows = buffered.GroupBy(row => { token.ThrowIfCancellationRequested(); return SqlValue.Key(plan.Groups.Select(g => g.Eval(row))); })
+                    .Select(group => { var context = group.First().Clone(); context.Group = group.ToList(); return context; });
             }
         }
         else if (plan.Having is not null) throw new DataSpaceException("HAVING requires grouping or aggregates.");
@@ -143,7 +129,7 @@ public sealed partial class QueryEngine
         };
     }
     private IEnumerable<EvaluationContext> JoinRows(IEnumerable<EvaluationContext> left, Join join, TableDefinition right,
-        List<(Source Source, TableDefinition Table)> earlier, IReadOnlyDictionary<string, object?> parameters, CancellationToken token, QueryStatistics statistics)
+        List<(Source Source, TableDefinition Table)> earlier, IReadOnlyDictionary<string, object?> parameters, CancellationToken token, QueryStatistics statistics, QueryExecution? execution = null)
     {
         CheckSize(right.Records.Count);
         var keys = new List<(NameExpr Left, NameExpr Right)>();
@@ -159,7 +145,7 @@ public sealed partial class QueryEngine
             var firstField = previous.Table.Field(pieces[1]); var secondField = right.Field(b.Name.Split('.').Last());
             if (ComparisonFamily(firstField.Type) == ComparisonFamily(secondField.Type)) keys.Add((a, b));
         }
-        var candidates = SourceRows(right, join.Source.Alias, parameters, token, statistics).ToArray();
+        var candidates = SourceRows(right, join.Source.Alias, parameters, token, statistics, execution: execution).ToArray();
         Dictionary<string, List<EvaluationContext>>? index = null;
         string? Key(EvaluationContext row, bool rightSide)
         {
@@ -203,7 +189,7 @@ public sealed partial class QueryEngine
     };
     private static EvaluationContext MergeSource(EvaluationContext left, EvaluationContext right, TableDefinition table, string alias)
     {
-        var context = left.Clone();
+        var context = left.Clone(); context.Aliases.Add(alias);
         foreach (var field in table.Fields)
         {
             var qualified = alias + "." + field.Name; var value = right.Values[qualified]; context.Values[qualified] = value;

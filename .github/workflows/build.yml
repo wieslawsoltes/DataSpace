@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
+      - name: Check duplicate-detail SQL reference fixtures
+        run: python3 scripts/check-duplicate-detail-sql.py
       - name: Test database, query and storage libraries
         run: dotnet test tests/DataSpace.Tests/DataSpace.Tests.csproj -c Release --logger 'trx;LogFileName=tests.trx'
       - name: Measure reproducible engine scenarios
@@ -71,6 +73,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Test native dialog keyboard helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test scripts/native-dialog-actions.test.mjs 2>&1 | tee artifacts/logs/native-dialog-unit-tests.log
       - name: Install browser test tools
         working-directory: scripts
         run: |

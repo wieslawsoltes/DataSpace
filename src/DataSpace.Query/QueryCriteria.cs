@@ -40,6 +40,8 @@ public static class QueryCriteria
         if (tokens[0].Kind == TokenKind.Word && Names.Equal(tokens[0].Text, "NOT") && tokens.Count > 1 && tokens[1].Text == "(")
             return "NOT (" + Expand(field, text[3..].Trim(), depth + 1) + ")";
         var first = tokens[0];
+        if (first.Kind == TokenKind.Word && (Names.Equal(first.Text, "EXISTS") ||
+            Names.Equal(first.Text, "NOT") && tokens.Count > 1 && Names.Equal(tokens[1].Text, "EXISTS"))) return text;
         if (first.Kind == TokenKind.Symbol && new[] { "=", "!=", "<>", ">", "<", ">=", "<=" }.Contains(first.Text) ||
             first.Kind == TokenKind.Word && new[] { "LIKE", "IN", "BETWEEN", "IS", "NOT" }.Contains(first.Text.ToUpperInvariant()))
             return field + " " + text;
@@ -47,7 +49,7 @@ public static class QueryCriteria
         if (tokens.All(t => t.Kind == TokenKind.Word) && !new[] { "TRUE", "FALSE", "NULL" }.Contains(text.ToUpperInvariant()))
             return field + " = '" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
         var value = SqlText.Parse(text);
-        return value is BinaryExpr { Op: "=" or "!=" or "<>" or "<" or ">" or "<=" or ">=" or "AND" or "OR" or "LIKE" } or NullExpr or InExpr
+        return value is BinaryExpr { Op: "=" or "!=" or "<>" or "<" or ">" or "<=" or ">=" or "AND" or "OR" or "LIKE" } or NullExpr or InExpr or SubqueryExpr { Kind: not SubqueryKind.Scalar }
             ? text : field + " = (" + text + ")";
     }
     private static bool Enclosed(List<Token> tokens)
@@ -83,6 +85,7 @@ internal static class SqlText
         BinaryExpr value => "(" + Format(value.Left) + " " + value.Op + " " + Format(value.Right) + ")",
         NullExpr value => "(" + Format(value.Operand) + " IS " + (value.Negated ? "NOT " : "") + "NULL)",
         InExpr value => "(" + Format(value.Operand) + (value.Negated ? " NOT IN (" : " IN (") + string.Join(", ", value.Items.Select(Format)) + "))",
+        SubqueryExpr value => value.ToSql(),
         FunctionExpr value => value.Name + "(" + string.Join(", ", value.Arguments.Select(Format)) + ")",
         _ => throw new DataSpaceException("Expression cannot be represented in Design View.")
     };
@@ -95,6 +98,8 @@ internal static class SqlText
         (BinaryExpr a, BinaryExpr b) => a.Op == b.Op && Same(a.Left, b.Left) && Same(a.Right, b.Right),
         (NullExpr a, NullExpr b) => a.Negated == b.Negated && Same(a.Operand, b.Operand),
         (InExpr a, InExpr b) => a.Negated == b.Negated && Same(a.Operand, b.Operand) && Sequence(a.Items, b.Items),
+        (SubqueryExpr a, SubqueryExpr b) => a.Kind == b.Kind && a.Negated == b.Negated && a.Comparison == b.Comparison && a.Sql == b.Sql &&
+            (a.Operand is null ? b.Operand is null : b.Operand is not null && Same(a.Operand, b.Operand)),
         (FunctionExpr a, FunctionExpr b) => a.Name == b.Name && Sequence(a.Arguments, b.Arguments),
         _ => false
     };

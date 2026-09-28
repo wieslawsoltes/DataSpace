@@ -9,22 +9,36 @@ internal sealed class EvaluationContext
     public Dictionary<string, object?> Values { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> Ambiguous { get; } = new(StringComparer.OrdinalIgnoreCase);
     public IReadOnlyDictionary<string, object?> Parameters { get; init; } = new Dictionary<string, object?>();
+    public HashSet<string> Aliases { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public EvaluationContext? Outer { get; init; }
+    public Func<SubqueryExpr, EvaluationContext, object?>? Subqueries { get; set; }
     public List<EvaluationContext>? Group { get; set; }
     public IReadOnlyDictionary<FunctionExpr, object?>? Aggregates { get; set; }
     public EvaluationContext Clone()
     {
-        var context = new EvaluationContext { Parameters = Parameters, Group = Group, Aggregates = Aggregates };
+        var context = new EvaluationContext { Parameters = Parameters, Group = Group, Aggregates = Aggregates, Outer = Outer, Subqueries = Subqueries };
         foreach (var pair in Values) context.Values[pair.Key] = pair.Value;
-        context.Ambiguous.UnionWith(Ambiguous);
+        context.Ambiguous.UnionWith(Ambiguous); context.Aliases.UnionWith(Aliases);
         return context;
     }
     public object? Resolve(string name, bool parameter = false)
     {
         if (parameter) return Parameters.TryGetValue(name, out var p) ? p : throw new DataSpaceException($"Parameter '@{name}' requires a value.");
-        if (Ambiguous.Contains(name)) throw new DataSpaceException($"Field '{name}' is ambiguous. Qualify it with a table alias.");
-        if (Values.TryGetValue(name, out var value)) return value;
-        if (Parameters.TryGetValue(name, out value)) return value;
+        if (FindOwner(name) is { } owner) return owner.Values[name];
+        if (Parameters.TryGetValue(name, out var value)) return value;
         throw new DataSpaceException($"Unknown field or parameter '{name}'.");
+    }
+    public EvaluationContext? FindOwner(string name)
+    {
+        for (var scope = this; scope is not null; scope = scope.Outer)
+        {
+            if (scope.Ambiguous.Contains(name)) throw new DataSpaceException($"Field '{name}' is ambiguous. Qualify it with a table alias.");
+            if (scope.Values.ContainsKey(name)) return scope;
+            var dot = name.IndexOf('.');
+            if (dot >= 0 && scope.Aliases.Contains(name[..dot]))
+                throw new DataSpaceException($"Unknown field '{name}' in the local alias scope.");
+        }
+        return null;
     }
 }
 

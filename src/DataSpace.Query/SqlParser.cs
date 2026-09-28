@@ -22,9 +22,10 @@ internal sealed record DropStatement(string Table) : Statement;
 internal sealed partial class SqlParser
 {
     private readonly List<Token> _tokens;
+    private readonly string _sql;
     private int _index, _depth;
     private Token Current => _tokens[_index];
-    public SqlParser(string sql) { _tokens = SqlLexer.Read(sql); }
+    public SqlParser(string sql) { _sql = sql; _tokens = SqlLexer.Read(sql); }
     private bool Is(string value) => (Current.Kind is TokenKind.Word or TokenKind.Symbol) && Names.Equal(Current.Text, value);
     private bool Match(string value) { if (!Is(value)) return false; _index++; return true; }
     private void Expect(string value) { if (!Match(value)) throw Error($"Expected '{value}', found '{Current.Text}'"); }
@@ -43,7 +44,7 @@ internal sealed partial class SqlParser
         else if (Match("TABLE")) statement = ReadQuery(TableSelect());
         else if (Match("INSERT")) statement = Insert();
         else if (Match("UPDATE")) statement = Update();
-        else if (Match("DELETE")) { Expect("FROM"); var table = Identifier(); statement = new DeleteStatement(table, Match("WHERE") ? Expression() : null); }
+        else if (Match("DELETE")) { Match("*"); Expect("FROM"); var table = Identifier(); statement = new DeleteStatement(table, Match("WHERE") ? Expression() : null); }
         else if (Match("CREATE")) statement = Create();
         else if (Match("ALTER"))
         {
@@ -132,6 +133,14 @@ internal sealed partial class SqlParser
         var offset = Match("OFFSET") ? PositiveInteger() : 0;
         return new(projections, sourceTable, joins, where, groups, having, order, distinct, limit, offset) { Into = into };
     }
+    private SubqueryExpr ReadSubquery(SubqueryKind kind, Expr? operand = null, string comparison = "=", bool negated = false)
+    {
+        var start = Current.Position;
+        Expect("SELECT");
+        var query = ReadQuery(Select()); // Reject SELECT INTO and all nested action statements.
+        var end = Current.Position; Expect(")");
+        return new(query, _sql[start..end].Trim(), kind, operand, comparison, negated);
+    }
     private int PositiveInteger()
     {
         if (Current.Kind != TokenKind.Number || !int.TryParse(Current.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value < 0) throw Error("Expected a non-negative integer");
@@ -167,12 +176,13 @@ internal sealed partial class SqlParser
         };
         var field = new FieldDefinition { Name = name, Type = type };
         if (Match("(")) { field.MaxLength = PositiveInteger(); Expect(")"); }
-        while (Is("PRIMARY") || Is("NOT") || Is("UNIQUE") || Is("DEFAULT"))
+        while (true)
         {
             if (Match("PRIMARY")) { Expect("KEY"); field.PrimaryKey = true; }
             else if (Match("NOT")) { Expect("NULL"); field.Required = true; }
             else if (Match("UNIQUE")) field.Unique = true;
-            else { Expect("DEFAULT"); field.DefaultValue = FieldValues.FromObject(Expression(7).Eval(new EvaluationContext())); }
+            else if (Match("DEFAULT")) field.DefaultValue = FieldValues.FromObject(Expression(4).Eval(new EvaluationContext()));
+            else break;
         }
         return field;
     }
@@ -185,7 +195,12 @@ internal sealed partial class SqlParser
             if (Match("NOT")) left = new UnaryExpr("NOT", Expression(3));
             else if (Match("-")) left = new UnaryExpr("-", Expression(7));
             else if (Match("+")) left = new UnaryExpr("+", Expression(7));
-            else if (Match("(")) { left = Expression(); Expect(")"); }
+            else if (Match("EXISTS")) { Expect("("); left = ReadSubquery(SubqueryKind.Exists); }
+            else if (Match("("))
+            {
+                if (Is("SELECT")) left = ReadSubquery(SubqueryKind.Scalar);
+                else { left = Expression(); Expect(")"); }
+            }
             else if (Match("NULL")) left = new LiteralExpr(null);
             else if (Match("TRUE")) left = new LiteralExpr(true);
             else if (Match("FALSE")) left = new LiteralExpr(false);
@@ -223,12 +238,22 @@ internal sealed partial class SqlParser
                 if (negated) { op = Current.Text.ToUpperInvariant(); if (!Match("LIKE") && !Match("IN") && !Match("BETWEEN")) throw Error("Expected LIKE, IN or BETWEEN after NOT"); }
                 if (op == "IS") { var not = Match("NOT"); Expect("NULL"); left = new NullExpr(left, not); }
                 else if (op == "IN")
-                { Expect("("); var items = new List<Expr>(); do items.Add(Expression()); while (Match(",")); Expect(")"); left = new InExpr(left, items, negated); }
+                {
+                    Expect("(");
+                    if (Is("SELECT")) left = ReadSubquery(SubqueryKind.In, left, negated: negated);
+                    else { var items = new List<Expr>(); do items.Add(Expression()); while (Match(",")); Expect(")"); left = new InExpr(left, items, negated); }
+                }
                 else if (op == "BETWEEN")
                 {
                     var lower = Expression(4); Expect("AND"); var upper = Expression(4);
                     left = new BinaryExpr("AND", new BinaryExpr(">=", left, lower), new BinaryExpr("<=", left, upper));
                     if (negated) left = new UnaryExpr("NOT", left);
+                }
+                else if (op is "=" or "<>" or "!=" or "<" or ">" or "<=" or ">=" && (Is("ANY") || Is("SOME") || Is("ALL")))
+                {
+                    var kind = Match("ALL") ? SubqueryKind.All : SubqueryKind.Any;
+                    if (kind == SubqueryKind.Any) { if (!Match("ANY")) Expect("SOME"); }
+                    Expect("("); left = ReadSubquery(kind, left, op);
                 }
                 else { left = new BinaryExpr(op, left, Expression(precedence + 1)); if (negated) left = new UnaryExpr("NOT", left); }
             }

@@ -5,20 +5,18 @@ namespace DataSpace.Query;
 public sealed partial class QueryEngine
 {
     private QueryResult ExecuteUnion(DatabaseDocument document, UnionStatement union, IReadOnlyDictionary<string, object?> parameters,
-        CancellationToken token, HashSet<string> path, QueryStatistics statistics)
+        CancellationToken token, HashSet<string> path, QueryStatistics statistics, QueryExecution execution, EvaluationContext? outer = null)
     {
         var branches = new List<QueryResult>(); var count = 0;
         foreach (var query in union.Queries)
         {
-            token.ThrowIfCancellationRequested(); var result = ExecuteSelect(document, query, parameters, token, path, statistics);
+            token.ThrowIfCancellationRequested(); var result = ExecuteSelect(document, query, parameters, token, path, statistics, execution, outer);
             if (branches.Count > 0 && result.Fields.Count != branches[0].Fields.Count) throw new DataSpaceException("UNION branches must have the same number of columns.");
             count = checked(count + result.Records.Count); CheckSize(count); branches.Add(result);
         }
         var fields = branches[0].Fields.Select(TableSchemaDraft.Copy).ToList();
         for (var column = 0; column < fields.Count; column++)
         {
-            // An untyped NULL literal must not turn otherwise numeric output into
-            // text (and thereby sort 10 before 2). Keep declared table field types.
             var types = branches.Select((branch, index) => (branch, plan: union.Queries[index]))
                 .Where(item => item.plan.Projections.Count != item.branch.Fields.Count ||
                     item.plan.Projections[column].Expression is not LiteralExpr { Value: null })
@@ -37,7 +35,6 @@ public sealed partial class QueryEngine
                 {
                     var target = fields[column]; var source = result.Fields[column];
                     var value = FieldValues.Parse(source, row[source.Name]);
-                    // Access-style Boolean arithmetic uses -1 for true and 0 for false.
                     if (value is bool boolean && target.Type != FieldType.YesNo && ComparisonFamily(target.Type) == 0)
                         value = boolean ? -1m : 0m;
                     record[target.Name] = FieldValues.Normalize(target, FieldValues.FromObject(value));
@@ -57,11 +54,12 @@ public sealed partial class QueryEngine
         if (rows.Count > Options.MaximumResultRows) throw new DataSpaceException("UNION result-row limit exceeded.");
         if (union.Order.Count > 0)
         {
-            var schema = new EvaluationContext { Parameters = parameters }; foreach (var field in fields) schema.Values[field.Name] = null;
-            foreach (var order in union.Order) foreach (var name in ExpressionAnalysis.Names(order.Expression)) schema.Resolve(name.Name, name.Parameter);
+            var scope = new SubqueryScope(this, document, parameters, token, path, statistics, execution, execution.Depth);
+            var schema = new EvaluationContext { Parameters = parameters, Outer = outer, Subqueries = scope.Evaluate }; foreach (var field in fields) schema.Values[field.Name] = null;
+            foreach (var order in union.Order) scope.Bind(order.Expression, schema);
             var decorated = rows.Select((row, ordinal) =>
             {
-                token.ThrowIfCancellationRequested(); var context = new EvaluationContext { Parameters = parameters };
+                token.ThrowIfCancellationRequested(); var context = new EvaluationContext { Parameters = parameters, Outer = outer, Subqueries = scope.Evaluate };
                 foreach (var field in fields) context.Values[field.Name] = FieldValues.Parse(field, row[field.Name]);
                 return (Row: row, Ordinal: ordinal, Keys: union.Order.Select(o => o.Expression is LiteralExpr { Value: decimal n } && n == decimal.Truncate(n) && n > 0 && n <= fields.Count
                     ? context.Values[fields[(int)n - 1].Name] : o.Expression.Eval(context)).ToArray());

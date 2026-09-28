@@ -18,6 +18,12 @@ public sealed class QueryStatistics
     public long SortCandidateRows { get; internal set; }
     public int PeakSortRows { get; internal set; }
     public long CrosstabCells { get; internal set; }
+    public long SubqueryExecutions { get; internal set; }
+    public long SubqueryCacheHits { get; internal set; }
+    public long SubqueryComparisons { get; internal set; }
+    public long MembershipIndexProbes { get; internal set; }
+    public int PeakSubqueryDepth { get; internal set; }
+    public long SubqueryCacheBytes { get; internal set; }
     public long OutputRows { get; internal set; }
 }
 public sealed class QueryResult
@@ -32,6 +38,12 @@ public sealed class QueryResult
 }
 public sealed class QueryOptions
 {
+    public bool EnableSubqueryCache { get; init; } = true;
+    public bool EnableMembershipIndexes { get; init; } = true;
+    public int MaximumSubqueryDepth { get; init; } = 16;
+    public int MaximumSubqueryExecutions { get; init; } = 10000;
+    public long MaximumTotalSourceRows { get; init; } = 10000000;
+    public long MaximumSubqueryCacheBytes { get; init; } = 8 * 1024 * 1024;
     public int MaximumIntermediateRows { get; init; } = 250000;
     public int MaximumResultRows { get; init; } = 100000;
     public int MaximumSourceDepth { get; init; } = 32;
@@ -54,7 +66,7 @@ public sealed partial class QueryEngine
     public QueryEngine(QueryOptions? options = null)
     {
         Options = options ?? new();
-        if (Options.MaximumIntermediateRows < 1 || Options.MaximumResultRows < 1 || Options.MaximumSourceDepth is < 1 or > 64 || Options.MaximumCrosstabColumns is < 1 or > 256 || Options.MaximumCrosstabCells < 1) throw new ArgumentOutOfRangeException(nameof(options));
+        if (Options.MaximumSubqueryDepth is < 1 or > 64 || Options.MaximumSubqueryExecutions < 1 || Options.MaximumTotalSourceRows < 1 || Options.MaximumSubqueryCacheBytes < 0 || Options.MaximumIntermediateRows < 1 || Options.MaximumResultRows < 1 || Options.MaximumSourceDepth is < 1 or > 64 || Options.MaximumCrosstabColumns is < 1 or > 256 || Options.MaximumCrosstabCells < 1) throw new ArgumentOutOfRangeException(nameof(options));
     }
     public bool IsReadOnly(string sql) => Parse(sql) is SelectStatement or UnionStatement or TransformStatement;
     private Statement Parse(string sql)
@@ -83,28 +95,37 @@ public sealed partial class QueryEngine
         cancellationToken.ThrowIfCancellationRequested(); var plan = Parse(sql);
         if (plan is SelectStatement or UnionStatement or TransformStatement) return Select(workspace.Document, sql, parameters, cancellationToken);
         var timer = Stopwatch.StartNew(); var affected = 0; var args = Parameters(parameters);
+        var statistics = new QueryStatistics(); var execution = new QueryExecution(Options, statistics, cancellationToken);
         workspace.Edit("Run action query", document =>
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var scope = new SubqueryScope(this, document, args, cancellationToken, new(StringComparer.OrdinalIgnoreCase), statistics, execution, 0);
+            var environment = new EvaluationContext { Parameters = args, Subqueries = scope.Evaluate };
             switch (plan)
             {
                 case InsertStatement insert:
                 {
                     var table = document.Table(insert.Table); var fields = InsertFields(table, insert.Fields);
+                    foreach (var expression in insert.Rows.SelectMany(row => row)) scope.Bind(expression, environment);
+                    var pending = new List<Dictionary<string, string?>>();
                     foreach (var values in insert.Rows)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (values.Count != fields.Count) throw new DataSpaceException("INSERT field and value counts differ.");
-                        var context = new EvaluationContext { Parameters = args };
-                        RecordOperations.Insert(table, fields.Select((f, i) => KeyValuePair.Create(f, FieldValues.FromObject(values[i].Eval(context)))).ToDictionary(p => p.Key, p => p.Value)); affected++;
+                        pending.Add(fields.Select((f, i) => KeyValuePair.Create(f, FieldValues.FromObject(values[i].Eval(environment)))).ToDictionary(p => p.Key, p => p.Value));
+                    }
+                    // Subqueries observe the pre-statement document, including
+                    // INSERT VALUES with multiple rows referencing this table.
+                    foreach (var values in pending)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested(); RecordOperations.Insert(table, values); affected++;
                     }
                     break;
                 }
                 case InsertSelectStatement insert:
                 {
                     var table = document.Table(insert.Table); var fields = InsertFields(table, insert.Fields);
-                    // Materialize the source before inserting, including self-appends.
-                    var result = Read(document, insert.Query, args, cancellationToken, new(StringComparer.OrdinalIgnoreCase), new());
+                    var result = Read(document, insert.Query, args, cancellationToken, new(StringComparer.OrdinalIgnoreCase), statistics, execution);
                     if (fields.Count != result.Fields.Count) throw new DataSpaceException("INSERT field and SELECT column counts differ.");
                     foreach (var row in result.Records)
                     {
@@ -117,10 +138,14 @@ public sealed partial class QueryEngine
                 {
                     var table = document.Table(update.Table);
                     if (update.Assignments.Select(a => a.Field).Distinct(StringComparer.OrdinalIgnoreCase).Count() != update.Assignments.Count) throw new DataSpaceException("UPDATE contains duplicate assignments.");
+                    var schema = AddSource(environment, table, table.Name, null);
+                    if (update.Where is not null) scope.Bind(update.Where, schema);
+                    foreach (var assignment in update.Assignments) scope.Bind(assignment.Value, schema);
                     var changes = new List<(string Id, Dictionary<string, string?> Values)>();
                     foreach (var row in table.Records)
                     {
-                        cancellationToken.ThrowIfCancellationRequested(); var context = AddSource(new EvaluationContext { Parameters = args }, table, table.Name, row);
+                        cancellationToken.ThrowIfCancellationRequested(); statistics.SourceRowsRead++; execution.ReadRow();
+                        var context = AddSource(environment, table, table.Name, row);
                         if (update.Where is not null && !SqlValue.Truth(update.Where.Eval(context))) continue;
                         changes.Add((row.Id, update.Assignments.ToDictionary(a => table.Field(a.Field).Name, a => FieldValues.FromObject(a.Value.Eval(context)))));
                     }
@@ -130,11 +155,13 @@ public sealed partial class QueryEngine
                 case DeleteStatement delete:
                 {
                     var table = document.Table(delete.Table); var ids = new List<string>();
+                    if (delete.Where is not null) scope.Bind(delete.Where, AddSource(environment, table, table.Name, null));
                     foreach (var row in table.Records)
-                    { cancellationToken.ThrowIfCancellationRequested(); if (delete.Where is null || SqlValue.Truth(delete.Where.Eval(AddSource(new EvaluationContext { Parameters = args }, table, table.Name, row)))) ids.Add(row.Id); }
+                    { cancellationToken.ThrowIfCancellationRequested(); statistics.SourceRowsRead++; execution.ReadRow();
+                        if (delete.Where is null || SqlValue.Truth(delete.Where.Eval(AddSource(environment, table, table.Name, row)))) ids.Add(row.Id); }
                     RecordOperations.Delete(document, table.Name, ids); affected = ids.Count; break;
                 }
-                case MakeTableStatement make: affected = MakeTable(document, make, args, cancellationToken); break;
+                case MakeTableStatement make: affected = MakeTable(document, make, args, cancellationToken, statistics, execution); break;
                 case CreateIndexStatement createIndex:
                     document.Table(createIndex.Table).Indexes.Add(new() { Name = createIndex.Index.Name, Fields = createIndex.Index.Fields.ToList(), Unique = createIndex.Index.Unique }); break;
                 case DropIndexStatement dropIndex:
@@ -157,7 +184,7 @@ public sealed partial class QueryEngine
             }
             cancellationToken.ThrowIfCancellationRequested();
         });
-        return new QueryResult { IsAction = true, AffectedRecords = affected, Duration = timer.Elapsed };
+        return new QueryResult { IsAction = true, AffectedRecords = affected, Duration = timer.Elapsed, Statistics = statistics };
     }
     private static List<string> InsertFields(TableDefinition table, List<string> requested)
     {
@@ -169,7 +196,7 @@ public sealed partial class QueryEngine
     private void CheckSize(int count) { if (count > Options.MaximumIntermediateRows) throw new DataSpaceException("Query intermediate-row limit exceeded."); }
     private static EvaluationContext AddSource(EvaluationContext original, TableDefinition table, string alias, Record? record)
     {
-        var context = original.Clone();
+        var context = original.Clone(); context.Aliases.Add(alias);
         foreach (var field in table.Fields)
         {
             var value = record is null ? null : FieldValues.Parse(field, record[field.Name]); context.Values[alias + "." + field.Name] = value;

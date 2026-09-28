@@ -28,7 +28,7 @@ public sealed class TableDesignerControl : UserControl, IDatabaseEditor
         try
         {
             Commit(); using var editor = new IndexDesignerControl(_workspace, _draft.TableName);
-            var error = OfficeVisuals.Text("", 12, "9C252A"); error.TextWrapping = TextWrapping.Wrap;
+            var error = new ValidationMessageControl();
             var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Indexes — " + _draft.TableName, Content = OfficeVisuals.Stack(error, editor), PrimaryButtonText = "Save Indexes", CloseButtonText = "Cancel" };
             dialog.PrimaryButtonClick += (_, e) => { try { editor.Commit(); } catch (Exception exception) { error.Text = exception.Message; e.Cancel = true; } };
             await dialog.ShowAsync(); _draft = new(_workspace.Document, _draft.TableName); _selected = null; HasPendingChanges = false; BuildRows();

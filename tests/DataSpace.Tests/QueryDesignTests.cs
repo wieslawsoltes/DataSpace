@@ -133,7 +133,9 @@ public sealed class QueryDesignTests
     }
     [Theory]
     [InlineData(">1; DELETE FROM Customers")]
-    [InlineData("IN (SELECT ID FROM Customers)")]
+    [InlineData("IN (SELECT ID INTO Stolen FROM Customers)")]
+    [InlineData("IN (SELECT ID FROM Customers; DELETE FROM Customers)")]
+    [InlineData("IN (DELETE FROM Customers)")]
     public void StatementInjectionIsRejected(string criterion) => Assert.Throws<DataSpaceException>(() => QueryCriteria.Compile("ID", criterion));
     [Fact]
     public void InvalidColumnConfigurationsFailBeforeExecution()
