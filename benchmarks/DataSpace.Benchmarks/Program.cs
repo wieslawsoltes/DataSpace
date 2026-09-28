@@ -128,11 +128,36 @@ if (correlationSlow.Statistics.SubqueryExecutions != 500 || correlationFast.Stat
 Pair("Repeated correlation / 500 outer / 250 inner / 8 keys", "Reexecute correlated aggregate for each outer row",
     () => noCorrelationCache.Select(repeated, correlatedSql), "Reuse identical bound outer-reference tuples",
     () => cached.Select(repeated, correlatedSql));
+// Compare SQL shapes without changing executor options. Both are read-only and
+// result-equivalent; the new authoring strategy removes correlated COUNTs even with repeated-key caching.
+var duplicates = new DatabaseDocument();
+var duplicateTable = new TableDefinition { Name = "DuplicateRows", Fields = [
+    new() { Name = "ID", Type = FieldType.Integer }, new() { Name = "Key" } ] };
+for (var i = 0; i < 1000; i++) RecordOperations.Insert(duplicateTable, new Dictionary<string, string?>
+    { ["ID"] = i.ToString(), ["Key"] = i % 19 == 0 ? null : "Group " + i % 31 });
+duplicates.Tables.Add(duplicateTable); SchemaValidator.Validate(duplicates);
+var duplicateDesign = new FindQueryDesign { Source = "DuplicateRows", MatchFields = ["Key"],
+    OutputFields = ["ID"], SummaryOnly = false, IncludeNullKeys = true };
+var duplicateSql = duplicateDesign.ToSql(duplicates);
+const string duplicateReferenceSql = "SELECT s.ID FROM DuplicateRows s WHERE (SELECT COUNT(*) FROM DuplicateRows d WHERE d.[Key]=s.[Key] OR (d.[Key] IS NULL AND s.[Key] IS NULL))>1";
+var duplicateEngine = new QueryEngine();
+var duplicateFast = duplicateEngine.Select(duplicates, duplicateSql);
+var duplicateSlow = duplicateEngine.Select(duplicates, duplicateReferenceSql);
+SameRows(duplicateFast, duplicateSlow);
+if (duplicateFast.Statistics.SubqueryExecutions != 2 || duplicateFast.Statistics.SourceRowsRead != 3000 ||
+    duplicateSlow.Statistics.SubqueryExecutions != 32 || duplicateSlow.Statistics.SourceRowsRead != 33000)
+    throw new Exception("Unexpected duplicate-detail query work count.");
+Pair("Duplicate details / 1,000 records / one text key including nulls", "Correlated counts with repeated-key cache enabled",
+    () => duplicateEngine.Select(duplicates, duplicateReferenceSql), "Independent grouped membership and null count",
+    () => duplicateEngine.Select(duplicates, duplicateSql), 3);
 var output = new
 {
     runtime = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
     processorCount = Environment.ProcessorCount, configuration = "Release", measuredAtUtc = DateTime.UtcNow,
     scope = "Managed engine microbenchmarks, not browser or hardware-GPU measurements; no storage I/O. Timings are environment-dependent.",
+    duplicateDetails = new { referenceExecutions = duplicateSlow.Statistics.SubqueryExecutions,
+        optimizedExecutions = duplicateFast.Statistics.SubqueryExecutions,
+        referenceSourceRows = duplicateSlow.Statistics.SourceRowsRead, optimizedSourceRows = duplicateFast.Statistics.SourceRowsRead },
     subqueries = new { referenceExecutions = scalarSlow.Statistics.SubqueryExecutions, optimizedExecutions = scalarFast.Statistics.SubqueryExecutions,
         referenceSourceRows = scalarSlow.Statistics.SourceRowsRead, optimizedSourceRows = scalarFast.Statistics.SourceRowsRead,
         referenceMembershipComparisons = membershipSlow.Statistics.SubqueryComparisons, optimizedMembershipProbes = membershipFast.Statistics.MembershipIndexProbes },

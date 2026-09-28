@@ -91,3 +91,25 @@ All public model objects remain mutable for construction/serialization. Change l
 Deterministic repeated outer tuples can reuse an inner result within one query execution. The key encodes exact bound outer values, including lexical scope, case and decimal representation, and the shared admission budget includes key storage. Independent and correlated entries share a 128-entry per-scope limit. New tuples beyond the limit use the reference evaluator; existing admitted tuples remain reusable. Volatile/saved-source subqueries are excluded. See SUBQUERIES.md for semantics and limits.
 
 The `Repeated correlation / 500 outer / 250 inner / 8 keys` benchmark switches only `EnableSubqueryCache` and contains no independent nested expressions. It asserts identical rows, 500 versus eight subquery executions, and 125,500 versus 2,500 total input reads. Timings, raw samples, total allocation counts and the runner environment are written to the existing performance artifact; those counts are not whole-app latency or peak-memory measurements. Correlations with mostly distinct tuples remain scan-bound.
+
+## Single-key duplicate detail authoring
+
+The Find Duplicates detail builder emits an independent grouped `IN` set for one
+match field, plus an independent NULL count only when NULL inclusion is enabled.
+The existing correlated-count form, with repeated-correlation caching enabled,
+remains the reference in the benchmark suite; composite detail queries retain
+that general form.
+
+With the default executor options and cache admission, the new single-key form
+needs one outer scan and one grouped inner scan, plus at most one NULL-count scan.
+The benchmark asserts 3,000 source-row reads versus 33,000 for its 1,000-record
+fixture (31 repeated non-null keys plus null), with identical default cache
+options on both engines. The corresponding expected inner execution counts are
+two versus 32. It verifies identical output before timing. These are expected work counts in a regression,
+not a new measured result. Disabling/exhausting the cache can cause reevaluation;
+GUID membership retains the existing comparison fallback. Storage is unchanged.
+
+`python3 scripts/check-duplicate-detail-sql.py` independently checks the golden
+SQL against a SQLite reference and pairwise fixture expectations. This is not a
+replacement for the .NET suite, a benchmark, or ACE/.NET collation qualification.
+The .NET golden test separately checks that `FindQueryDesign` emits this SQL.
