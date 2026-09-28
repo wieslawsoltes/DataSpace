@@ -7,7 +7,20 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
     const peer = (role, name) => page.getByRole(role, { name, exact: true }).first();
     async function button(name, last = false) {
         const matches = page.getByRole('button', { name, exact: true });
-        await (last ? matches.last() : matches.first()).press('Enter'); await page.waitForTimeout(250);
+        const target = last ? matches.last() : matches.first();
+        if (['Generate SQL', 'Cancel', 'Continue'].includes(name)) {
+            // A DOM focus() on Uno's clipped semantic button is not necessarily
+            // a native focus transition. Start with a real Tab even when that
+            // proxy already looks focused; then activate the native target.
+            await page.keyboard.press('Tab');
+            for (let i = 0; i < 100; i++) {
+                if (await target.evaluate(element => document.activeElement === element)) break;
+                await page.keyboard.press('Tab'); await page.waitForTimeout(50);
+            }
+            assert.ok(await target.evaluate(element => document.activeElement === element), name + ' must be keyboard reachable.');
+            await page.keyboard.press('Enter');
+        } else await target.press('Enter');
+        await page.waitForTimeout(250);
     }
     async function edit(name, value) {
         const input = peer('textbox', name); await input.focus(); await page.waitForTimeout(150);
@@ -50,7 +63,8 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
         await button('Find Duplicates'); await button('Cancel');
         assert.equal(await peer('textbox', 'SQL statement').inputValue(), previous); checks++;
         await button('Find Duplicates'); await button('Generate SQL');
-        assert.ok(await peer('checkbox', 'Match field Country').count(), 'An empty selection must retain the builder for correction.'); checks++;
+        assert.ok(await peer('checkbox', 'Match field Country').count(), 'An empty selection must retain the builder for correction.');
+        assert.match(await page.locator('body').ariaSnapshot(), /Select 1.*16 fields/); checks++;
         await toggle('Match field Country', true);
         await page.screenshot({ path: screenshots + '/find-duplicates-builder.png', fullPage: true });
         await button('Generate SQL'); assert.ok((await peer('textbox', 'SQL statement').inputValue()).includes('HAVING COUNT(*) > 1')); checks++;
@@ -75,7 +89,9 @@ export async function subqueryBrowserChecks(page, baseURL, screenshots, ready) {
         await page.screenshot({ path: screenshots + '/correlated-subquery-results.png', fullPage: true });
         await button('SQL View'); const before = JSON.stringify((await database()).Tables);
         await edit('SQL statement', 'UPDATE BrowserArchive SET Company=(SELECT Company FROM Customers);');
-        await button('Run'); await button('Continue'); await save('UPDATE BrowserArchive');
+        await button('Run'); await button('Continue');
+        assert.ok((await page.locator('body').ariaSnapshot()).includes('A scalar subquery returned more than one row.'), 'The action must actually execute and report its scalar error, not be cancelled.');
+        await save('UPDATE BrowserArchive');
         assert.equal(JSON.stringify((await database()).Tables), before, 'A multirow scalar action must roll back all data edits.'); checks++;
         await edit('SQL statement', sql); await button('Run'); await save('OrderCount');
         return checks;
