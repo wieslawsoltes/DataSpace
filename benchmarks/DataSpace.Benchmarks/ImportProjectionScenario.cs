@@ -27,13 +27,13 @@ public sealed class ImportProjectionScenario : IDisposable
     public TableDefinition FullThenSelect()
     {
         var full = SourceImport.ReadTableAsync(_source, _table, "Copy").GetAwaiter().GetResult();
-        var result = new TableDefinition { Name = "Copy", Fields = full.Fields.Where(field => _included.Contains(field.Name)).ToList() };
+        var skipped = full.Fields.Where(field => !_included.Contains(field.Name)).Select(field => field.Name).ToArray();
+        full.Fields.RemoveAll(field => !_included.Contains(field.Name));
+        // The reference is already detached: remove discarded fields in place,
+        // rather than inflating the baseline with a second row graph/identity set.
         foreach (var row in full.Records)
-        {
-            var copy = new Record(); foreach (var field in result.Fields) copy[field.Name] = row[field.Name];
-            result.Records.Add(copy);
-        }
-        SchemaValidator.ValidateTable(result); return result;
+            foreach (var field in skipped) row.Values.Remove(field);
+        SchemaValidator.ValidateTable(full); return full;
     }
     public TableDefinition SelectiveImport() => SourceImport.ReadTableAsync(_source, _table, "Copy", _plan).GetAwaiter().GetResult();
     public static object Measure()
@@ -58,7 +58,7 @@ public sealed class ImportProjectionScenario : IDisposable
             medianAllocatedBytes = samples.Select(s => s.AllocatedBytes).Order().ElementAt(2), samples };
         return new { rows = 5000, sourceFields = 32, destinationFields = 3,
             baseline = Summary(baseline), optimized = Summary(optimized),
-            scope = "Warm parsed JSON. Baseline imports all fields then selects/validates three; optimized imports those same three directly. Both fetch all source columns. Output names, values and order match; internal row IDs differ. Source construction, I/O, workspace commit and Uno rendering excluded." };
+            scope = "Warm parsed JSON. Baseline imports all fields, removes unwanted fields in place and validates three; optimized imports those same three directly. Both fetch all source columns. Output names, values and order match; internal row IDs differ. Source construction, I/O, workspace commit and Uno rendering excluded." };
     }
     private sealed record ImportSample(double Milliseconds, long AllocatedBytes);
     public void Dispose() => _source.DisposeAsync().GetAwaiter().GetResult();
