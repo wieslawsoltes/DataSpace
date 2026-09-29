@@ -51,7 +51,7 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         EditorVisuals.Labeled(_pointerFields, "JSON Pointer", _pointer); left.Children.Add(_pointerFields);
         AutomationProperties.SetAutomationId(_address, "SourceEndpoint"); AutomationProperties.SetAutomationId(_pointer, "SourceJsonPointer"); AutomationProperties.SetAutomationId(_token, "SourceAccessToken");
         _hint.TextWrapping = TextWrapping.Wrap; left.Children.Add(_hint);
-        _connect = OfficeVisuals.Button("Browse / Connect", () => Run(ConnectAsync), "open", "SourceConnect"); left.Children.Add(_connect);
+        _connect = OfficeVisuals.Button("Browse / Connect", () => Run(ConnectAsync, _connect), "open", "SourceConnect"); left.Children.Add(_connect);
         EditorVisuals.Labeled(_catalogFields, "Available databases", _sourceList); left.Children.Add(_catalogFields); AutomationProperties.SetAutomationId(_sourceList, "GatewaySources");
         EditorVisuals.Labeled(left, "Tables", _tables); AutomationProperties.SetAutomationId(_tables, "SourceTables");
         left.Children.Add(OfficeVisuals.Text("Import options", 15, bold: true));
@@ -61,22 +61,23 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         var right = OfficeVisuals.Grid("Auto,Auto,*,Auto"); right.Margin = new(14, 0, 0, 0);
         var label = OfficeVisuals.Text("Read-only preview", 15, bold: true); label.Margin = new(0, 0, 0, 8); OfficeVisuals.Add(right, label);
         OfficeVisuals.Add(right, _error, 1); OfficeVisuals.Add(right, _preview, 2);
-        _previous = OfficeVisuals.Button("◀ Previous", () => Run(ct => PageAsync(Math.Max(0, _offset - 200), ct)), automationId: "SourcePrevious");
-        _next = OfficeVisuals.Button("Next ▶", () => Run(ct => PageAsync(_offset + 200, ct)), automationId: "SourceNext");
-        _refresh = OfficeVisuals.Button("Refresh", () => Run(async ct => { _pager?.Invalidate(); await PageAsync(0, ct); }), "refresh", "SourceRefresh");
-        var navigation = OfficeVisuals.Row(_previous, _next, _refresh); navigation.Margin = new(0, 8, 0, 0); OfficeVisuals.Add(right, navigation, 3);
+        _previous = OfficeVisuals.Button("◀ Previous", () => Run(ct => PageAsync(Math.Max(0, _offset - 200), ct), _previous), automationId: "SourcePrevious");
+        _next = OfficeVisuals.Button("Next ▶", () => Run(ct => PageAsync(_offset + 200, ct), _next), automationId: "SourceNext");
+        _refresh = OfficeVisuals.Button("Refresh", () => Run(async ct => { _pager?.Invalidate(); await PageAsync(0, ct); }, _refresh), "refresh", "SourceRefresh");
+        var navigation = OfficeVisuals.Row(_previous, _next, _refresh); navigation.Margin = new(0, 8, 0, 0);
+        OfficeVisuals.Add(right, navigation, 3);
         OfficeVisuals.Add(root, right, 1, 1);
         var footer = OfficeVisuals.Grid("Auto,Auto", "*,Auto,Auto"); footer.Margin = new(14, 12, 0, 0);
         OfficeVisuals.Add(footer, _status);
         _cancel = OfficeVisuals.Button("Cancel operation", () => _operation?.Cancel()); OfficeVisuals.Add(footer, _cancel, column: 1);
-        _import = OfficeVisuals.Button("Import table", () => Run(ImportAsync), "table", "SourceImport"); OfficeVisuals.Add(footer, _import, column: 2);
+        _import = OfficeVisuals.Button("Import table", () => Run(ImportAsync, _import), "table", "SourceImport"); OfficeVisuals.Add(footer, _import, column: 2);
         var note = OfficeVisuals.Text("Import creates a local snapshot. Source records are never modified. Online credentials stay on the gateway; this token is not saved.", 11, "666666"); note.TextWrapping = TextWrapping.Wrap; note.Margin = new(0, 8, 0, 0);
         OfficeVisuals.Add(footer, note, 1, columnSpan: 3); OfficeVisuals.Add(root, footer, 2, columnSpan: 2);
         Content = root;
         _provider.SelectedItem = initialProvider;
         _provider.SelectionChanged += (_, _) => { if (!_busy) { SetMode(); _ = ClearSourceAsync(); } };
-        _sourceList.SelectionChanged += (_, _) => { if (!_changing && !_busy && _sourceList.SelectedItem is GatewaySource source) Run(ct => UseSourceAsync(new GatewayDataSource(_address.Text, _token.Password, source), ct)); };
-        _tables.SelectionChanged += (_, _) => { if (!_changing && !_busy) Run(ct => PageAsync(0, ct)); };
+        _sourceList.SelectionChanged += (_, _) => { if (!_changing && !_busy && _sourceList.SelectedItem is GatewaySource source) Run(ct => UseSourceAsync(new GatewayDataSource(_address.Text, _token.Password, source), ct), _sourceList); };
+        _tables.SelectionChanged += (_, _) => { if (!_changing && !_busy) Run(ct => PageAsync(0, ct), _tables); };
         SetMode(); UpdateButtons();
     }
     private void SetMode()
@@ -88,13 +89,35 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         _catalogFields.Visibility = remote ? Visibility.Visible : Visibility.Collapsed;
         _hint.Text = remote ? "Connect to a DataSpace gateway configured for your database. Database connection strings are entered on the server, not here." : mode == "SQLite file" ? "Open a local SQLite file (up to 16 MiB). The source is read-only; imports and exports create separate copies." : "Use an array of objects. Nested values and non-integer numbers are preserved as text; the optional pointer selects a nested array.";
     }
-    private async void Run(Func<CancellationToken, Task> action)
+    private async void Run(Func<CancellationToken, Task> action, Control? returnFocus = null)
     {
-        if (_busy || _disposed) return; _busy = true; _error.Text = ""; _operation = new CancellationTokenSource(TimeSpan.FromSeconds(30)); UpdateButtons();
+        if (_busy || _disposed) return;
+        _busy = true; _error.Text = ""; _operation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        // Disabling the focused selector while its popup closes can leave the
+        // shared-canvas focus manager targeting the workspace behind this dialog.
+        // Keep a native focus target inside the modal throughout the operation.
+        _cancel.IsEnabled = true;
+        _cancel.Focus(FocusState.Programmatic);
+        UpdateButtons();
         try { await action(_operation.Token); }
         catch (OperationCanceledException) { if (!_disposed) SetStatus("Operation cancelled. No partial table was imported."); }
         catch (Exception error) { if (!_disposed) { _error.Text = error.Message; SetStatus("Operation not completed."); } }
-        finally { _operation.Dispose(); _operation = null; _busy = false; if (!_disposed) UpdateButtons(); }
+        finally
+        {
+            _operation.Dispose(); _operation = null; _busy = false;
+            if (!_disposed)
+            {
+                UpdateButtons();
+                // Finish popup/key dispatch before restoring focus. Last/first
+                // pages may disable the originating navigation button.
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_disposed || _busy || !IsLoaded || ImportedTable is not null) return;
+                    var target = returnFocus is { IsEnabled: true } ? returnFocus : _tables.SelectedItem is not null ? _tables : _connect;
+                    target.Focus(FocusState.Programmatic);
+                });
+            }
+        }
     }
     private async Task ConnectAsync(CancellationToken ct)
     {
