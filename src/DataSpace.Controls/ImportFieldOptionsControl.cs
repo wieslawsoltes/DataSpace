@@ -3,7 +3,7 @@ using DataSpace.DataSources;
 namespace DataSpace.Controls;
 
 /// <summary>Reusable per-field import properties. One native property editor is reused for all source columns.</summary>
-public sealed class ImportFieldOptionsControl : UserControl
+public sealed class ImportFieldOptionsControl : UserControl, IDisposable
 {
     private static readonly (string Label, FieldType Type)[] Types =
     [ ("Short Text", FieldType.ShortText), ("Long Text", FieldType.LongText), ("Integer", FieldType.Integer),
@@ -72,6 +72,7 @@ public sealed class ImportFieldOptionsControl : UserControl
     public void SetPlan(SourceImportPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        Store();
         _loading = true; _plan = plan; _field.Items.Clear();
         foreach (var field in plan.Fields) _field.Items.Add(field.SourceName);
         _index = plan.Fields.Count == 0 ? -1 : 0; _field.SelectedIndex = _index;
@@ -119,4 +120,11 @@ public sealed class ImportFieldOptionsControl : UserControl
         _length.IsEnabled = enabled && _type.SelectedIndex == 0;
         _keyName.IsEnabled = _generate.IsChecked == true;
     }
+
+    public void Dispose()
+    {
+        _loading = true; _plan = null; _index = -1; _field.Items.Clear();
+        Content = null;
+    }
+
 }

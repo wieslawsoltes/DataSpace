@@ -154,6 +154,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         const choosingMapped = page.waitForEvent('filechooser'); await button('Browse / Connect', true); await (await choosingMapped).setFiles(json);
         await status(/records 1–3/); await edit('Local table name', 'Mapped_Import_Test');
         await button('Field Options', true);
+        assert.equal(await page.getByRole('textbox', { name: 'Destination field name', exact: true }).count(), 1); checks++;
         await edit('Destination field name', 'ExternalID');
         await selectIndex('Import data type', 0); // Explicitly preserve IDs as Short Text.
         await edit('Short Text maximum length', '20');
@@ -164,6 +165,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await button('Data Preview', true); await button('Field Options', true);
         await page.screenshot({ path: screenshots + '/import-field-options.png', fullPage: true });
         await button('Import table', true); const mapped = await saveTable('Mapped_Import_Test', 3);
+        await page.getByRole('textbox', { name: 'Destination field name', exact: true }).waitFor({ state: 'detached', timeout: 5000 }); checks++;
         assert.deepEqual(mapped.Fields.map(field => field.Name), ['RowID', 'ExternalID', 'title', 'active', 'empty']); checks++;
         assert.equal(mapped.Fields[0].Type, 'AutoNumber'); assert.equal(mapped.Fields[0].PrimaryKey, true); assert.equal(mapped.NextAutoNumber, 4); checks++;
         assert.equal(mapped.Fields[1].Type, 'ShortText'); assert.equal(mapped.Records[2].Values.ExternalID, '3'); assert.equal(mapped.Records[2].Values.RowID, '3'); checks++;
