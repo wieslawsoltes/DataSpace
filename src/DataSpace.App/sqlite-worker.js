@@ -11,7 +11,7 @@ function query(sql, params = []) {
     finally { statement.free(); }
 }
 function describe() {
-    const names = query("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 129").map(row => row[0]);
+    const names = query("SELECT name FROM sqlite_schema WHERE type='table' AND lower(name) NOT GLOB 'sqlite_*' ORDER BY name LIMIT 129").map(row => row[0]);
     if (!names.length || names.length > 128) throw new Error('SQLite source requires 1–128 user tables.');
     return names.map(name => {
         const fields = query('SELECT name,type,pk FROM pragma_table_info(?) ORDER BY cid', [name]);
@@ -51,11 +51,14 @@ function exportTable(SQL, value) {
     const { name, columns, rows } = value;
     if (typeof name !== 'string' || !name || name.length > 64 || !Array.isArray(columns) || columns.length < 1 || columns.length > 128 || !Array.isArray(rows) || rows.length > 100000) throw new Error('Invalid SQLite export.');
     if (columns.some(c => typeof c !== 'string' || c.length < 1 || c.length > 512) || new Set(columns.map(c => c.toLowerCase())).size !== columns.length) throw new Error('Invalid export columns.');
+    // SQLite reserves sqlite_ regardless of quoting. Exports contain one table,
+    // so prefixing is deterministic and cannot collide with another export table.
+    const tableName = /^sqlite_/i.test(name) ? 'DataSpace_' + name : name;
     const output = new SQL.Database();
     try {
-        output.run(`CREATE TABLE ${quote(name)} (${columns.map(c => quote(c) + ' TEXT').join(',')})`);
+        output.run(`CREATE TABLE ${quote(tableName)} (${columns.map(c => quote(c) + ' TEXT').join(',')})`);
         output.run('BEGIN');
-        const insert = output.prepare(`INSERT INTO ${quote(name)} VALUES (${columns.map(() => '?').join(',')})`);
+        const insert = output.prepare(`INSERT INTO ${quote(tableName)} VALUES (${columns.map(() => '?').join(',')})`);
         try {
             let characters = 0;
             for (const row of rows) {

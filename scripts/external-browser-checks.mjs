@@ -26,7 +26,9 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
                 const exported = await client.call('export', { name: 'Copy', columns: ['ID', 'Title'], rows: [['9223372036854775807', 'Unicode 😀'], ['2', null]] });
                 await client.open(exported);
                 const copy = await client.call('page', { table: 'Copy', offset: 0, limit: 10 });
-                return { tables, exact, first, last, denied, copy };
+                const unreserved = await client.call('export', { name: 'sqliteX', columns: ['Value'], rows: [['kept']] });
+                const visible = await client.open(unreserved);
+                return { tables, exact, first, last, denied, copy, unreservedName: visible[0].name };
             } finally { client.close(); }
         }, { baseURL, fixture });
         assert.equal(result.tables.length, 2); checks++;
@@ -35,6 +37,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         assert.equal(result.last.rows.length, 3); assert.equal(result.last.hasMore, false); checks++;
         assert.equal(result.denied, true); checks++;
         assert.deepEqual(result.copy.rows, [['9223372036854775807', 'Unicode 😀'], ['2', null]]); checks++;
+        assert.equal(result.unreservedName, 'sqliteX'); checks++;
         const gateway = await worker.evaluate(async () => {
             const headers = { Authorization: 'Bearer DataSpace_browser_test_token_only_46' };
             const denied = await fetch('http://127.0.0.1:5099/v1/sources');
@@ -121,10 +124,13 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         const bytes = await readFile(await (await download).path()); assert.equal(bytes.subarray(0, 16).toString(), 'SQLite format 3\0'); checks++;
         const verified = await page.evaluate(async ({ baseURL, bytes }) => {
             const { SqliteWorkerClient } = await import(new URL('browser-sqlite.js', baseURL).href); const client = new SqliteWorkerClient();
-            try { await client.open(new Uint8Array(bytes).buffer); return await client.call('page', { table: 'SQLite_Import_Test', offset: 400, limit: 200 }); }
-            finally { client.close(); }
+            try {
+                const tables = await client.open(new Uint8Array(bytes).buffer);
+                return { tables, page: await client.call('page', { table: tables[0].id, offset: 400, limit: 200 }) };
+            } finally { client.close(); }
         }, { baseURL, bytes: [...bytes] });
-        assert.equal(verified.rows.length, 3); checks++;
+        assert.equal(verified.tables[0].name, 'DataSpace_SQLite_Import_Test');
+        assert.equal(verified.page.rows.length, 3); checks++;
         // Exercise the .NET HTTP adapters through the actual Uno dialog, not
         // just a JavaScript fetch. The CI gateway exposes a disposable SQLite table.
         await button('External Data'); await button('Online Database');

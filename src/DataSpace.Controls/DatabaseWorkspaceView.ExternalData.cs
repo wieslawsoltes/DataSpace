@@ -33,6 +33,7 @@ public sealed partial class DatabaseWorkspaceView
             await ExportAsync(name + ".sqlite", "application/vnd.sqlite3", bytes);
         }
         else await ExportAsync(name + ".json", "application/json", SourceImport.ExportJson(fields, rows));
-        ShowStatus("Exported current table view as a separate " + (sqlite ? "SQLite" : "JSON") + " file.");
+        ShowStatus(sqlite ? "Exported SQLite table '" + SqliteExportNames.TableName(name) + "' as a separate file."
+            : "Exported current table view as a separate JSON file.");
     }
 }

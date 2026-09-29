@@ -13,7 +13,7 @@ public static class SqliteFiles
         using var connection = new SqliteConnection(connectionString); connection.Open();
         using (var options = connection.CreateCommand()) { options.CommandText = "PRAGMA query_only=ON; PRAGMA trusted_schema=OFF;"; options.ExecuteNonQuery(); }
         using var list = connection.CreateCommand();
-        list.CommandText = "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 129";
+        list.CommandText = "SELECT name FROM sqlite_schema WHERE type='table' AND lower(name) NOT GLOB 'sqlite_*' ORDER BY name LIMIT 129";
         var names = new List<string>(); using (var reader = list.ExecuteReader()) while (reader.Read()) names.Add(reader.GetString(0));
         if (names.Count is < 1 or > 128) throw new DataSpaceException("SQLite source requires 1–128 user tables.");
         var bindings = new List<TableBinding>();
@@ -33,6 +33,7 @@ public static class SqliteFiles
     public static Task<byte[]> ExportAsync(string name, FieldDefinition[] fields, Record[] rows, CancellationToken cancellationToken = default) => Task.Run(() =>
     {
         if (fields.Length is < 1 or > SourceLimits.MaxColumns || rows.Length > SourceLimits.MaxImportRows) throw new DataSpaceException("SQLite export exceeds the table size limit.");
+        name = SqliteExportNames.TableName(name);
         var path = Path.Combine(Path.GetTempPath(), "dataspace-" + Guid.NewGuid().ToString("N") + ".sqlite");
         try
         {

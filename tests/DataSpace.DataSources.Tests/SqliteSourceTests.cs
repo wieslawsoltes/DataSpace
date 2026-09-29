@@ -44,6 +44,29 @@ public sealed class SqliteSourceTests
         finally { File.Delete(path); }
     }
     [Theory]
+    [InlineData("sqlite_items", "DataSpace_sqlite_items")]
+    [InlineData("SQLiTe_Items", "DataSpace_SQLiTe_Items")]
+    [InlineData("sqliteX", "sqliteX")]
+    [InlineData("sqlite", "sqlite")]
+    [InlineData("a\"b", "a\"b")]
+    public async Task ExportNamesRemainDiscoverableAndRoundTrip(string name, string expected)
+    {
+        Assert.Equal(expected, SqliteExportNames.TableName(name));
+        Assert.Equal(expected, SqliteExportNames.TableName(expected));
+        var fields = new[] { new FieldDefinition { Name = "Value" } };
+        var rows = new[] { new Record { Values = new() { ["Value"] = "Exact 😀" } } };
+        var bytes = await SqliteFiles.ExportAsync(name, fields, rows);
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, bytes);
+            await using var source = await SqliteFiles.OpenAsync(path);
+            Assert.Equal(expected, Assert.Single(await source.GetTablesAsync()).Name);
+            Assert.Equal("Exact 😀", (await source.ReadAsync(new(expected))).Rows[0][0]);
+        }
+        finally { File.Delete(path); }
+    }
+    [Theory]
     [InlineData(SourceDialect.Sqlite, "a\"b", "\"a\"\"b\"")]
     [InlineData(SourceDialect.PostgreSql, "a\"b", "\"a\"\"b\"")]
     [InlineData(SourceDialect.MySql, "a`b", "`a``b`")]

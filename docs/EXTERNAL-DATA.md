@@ -54,6 +54,8 @@ The read-only protocol exposes three GET endpoints: `/v1/sources`, `/v1/sources/
 
 Relational values are imported as text/null to avoid implicit narrowing of database-specific types. Binary data is represented as `hex:` plus uppercase hexadecimal. JSON signed 64-bit integers and booleans are typed; non-integer numbers and nested arrays/objects remain their JSON text. Missing properties become null and empty strings remain empty. Local field names are sanitized, retaining original captions.
 
+SQLite reserves table names beginning with `sqlite_`, including case variations. Export prefixes those names with `DataSpace_` (for example `SQLite_Items` becomes `DataSpace_SQLite_Items`) and reports the resulting table name in the status bar. The local DataSpace table and exported file name are unchanged. Names such as `sqliteX` are not reserved and remain unchanged.
+
 SQLite export creates a separate database with TEXT/null columns. It does not preserve source types, indexes, constraints, triggers, views, relationships or Access objects. This is data interchange, not a byte-identical database backup. Values already stored as SQLite REAL have the precision of that stored representation.
 
 The limits are 16 MiB per source file, 100,000 imported records, 128 columns, 1,000 rows per protocol page, offset up to 1,000,000, and one million characters per cell. Page contents also have a cumulative character limit and HTTP byte limits. The UI requests 200 rows per page. JSON needs at least one discoverable column. SQLite supports up to 128 user tables. Preview caches hold 1–16 pages, default four.
