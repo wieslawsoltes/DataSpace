@@ -1,3 +1,5 @@
+using Microsoft.UI.Xaml.Automation.Peers;
+
 namespace DataSpace.Controls;
 
 /// <summary>A visible polite status announcement that keeps Uno/Skia semantic text synchronized.</summary>
