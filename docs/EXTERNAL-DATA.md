@@ -1,6 +1,6 @@
 # External data sources
 
-DataSpace preview.4 provides read-only browsing and explicit local-copy import. SQLite runs locally; online databases use a separately hosted DataSpace gateway. GitHub Pages hosts only the frontend, not the gateway or a database service.
+DataSpace preview.5 provides read-only browsing and explicit local-copy import. SQLite runs locally; online databases use a separately hosted DataSpace gateway. GitHub Pages hosts only the frontend, not the gateway or a database service.
 
 ## Use the workspace
 
@@ -11,6 +11,18 @@ JSON inputs must contain an array of objects. JSON Pointer can select a nested a
 The preview requests 200 records per page and caches four pages by default. Refresh invalidates the preview cache. Choose a unique local table name and a maximum record count, then select **Import table**. The source is read into a detached draft and added to the workspace in one validated, undoable transaction. A cancelled or invalid import does not add a partial table. Save the workspace afterward.
 
 **Imports are copies, not linked tables.** Editing a copy never updates the source. Refresh updates the preview, not an existing imported table. Independent offset-based requests do not provide a transaction spanning all pages: use a stable unique ordering key and avoid concurrent source changes during an import.
+
+## Import field options
+
+After a table is loaded, choose **Field Options** beside **Data Preview**. One reusable native property editor serves all columns: select a source field, rename its local destination, choose a supported data type, set Short Text length, require values, create a unique field constraint, or skip it. Primary keys can use an existing selected field or a new AutoNumber field with a configurable name. The generated field appears first, starts at 1 and leaves the next number ready for subsequent record insertion.
+
+The default remains all fields with conservative inferred types and no added key. Explicit numeric/currency/date conversions use DataSpace's invariant field semantics; keep Long Text for values whose original formatting or precision must not change. Required/unique/key constraints are validated for the complete imported table. No partial table is committed after a conversion error, duplicate key, schema change, cancellation or limit failure. The error identifies the row and field, and the dialog retains its draft for correction. Original source captions are retained separately from destination field names.
+
+Specifications stay in the open source dialog, one per table, and are cleared on reconnection. They are not persisted import jobs, Access specification files, append operations or live links. The reusable `SourceImportPlan` / `SourceImportField` API can also order mappings independently of source order. The engine snapshots the plan and catalog before I/O; skipped columns are not normalized or retained in the output, but current adapters still fetch complete source pages. A final post-read cancellation check also covers adapters that ignore cancellation tokens.
+
+For example, call `SourceImportPlan.CreateDefault(table)`, replace its immutable field mappings with updated `Name`, `Type`, `Include` or key properties, set optional `GeneratedKeyName`, then pass the plan to the `SourceImport.ReadTableAsync` overload. `plan.Validate(table, localTableName)` checks structural choices before reading records. Existing overloads continue to use default mappings.
+
+Imported destination values are capped at 16,777,216 UTF-16 characters across all pages, in addition to existing row/page/file limits. This bounds retained text, not total process memory. JSON exports now count both flushed and buffered UTF-8 bytes, stop consuming over-limit enumerables promptly, flush bounded chunks and expose a cancellation-aware overload. Malformed null catalogs/pages fail with controlled source errors.
 
 ## Adapters and reusable components
 
@@ -67,3 +79,5 @@ Only SQLite execution moves to a browser worker. JSON parsing, complete imports 
 The source tests cover JSON, real native SQLite, gateway authorization and page contracts. The live service job covers PostgreSQL, MariaDB and SQL Server. A separate MySQL version is not yet qualified. The browser suite exercises actual Uno file selection, import/export, SQLite worker operations, HTTP adapters and persistence; results must be read from the exact commit's CI run.
 
 The existing `DataSpace.Benchmarks` program includes a warm JSON page-read comparison. Both paths use already-parsed data and return an identical late page. The reference repeats JSON array indexing and per-column lookup; the optimized path indexes small row handles and enumerates each object's properties once. Parsing, schema scanning, handle-index construction, I/O and rendering are excluded from its timing. The handle index adds storage proportional to the row count. Separate assertions check that cache hits cause no additional row decoding. These measurements do not establish whole-application, startup, browser or GPU speedups.
+
+The benchmark suite additionally compares a 5,000-row, 32-column import followed by selection of three columns against importing those same three columns directly. It checks equivalent output field names, values and ordering (fresh internal record IDs naturally differ). Both paths read every source page; parsed-source construction, I/O, workspace commit and rendering are excluded. The optimization reduces local destination materialization and validation, not remote bytes transferred.

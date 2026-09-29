@@ -58,7 +58,7 @@ public sealed class SourceImportPlan
                 Description = "Source: " + schema[ordinal].Name + " (" + schema[ordinal].NativeType + ")",
                 Type = mapping.Type, Required = mapping.Required || mapping.PrimaryKey,
                 Unique = mapping.Unique || mapping.PrimaryKey, PrimaryKey = mapping.PrimaryKey,
-                MaxLength = mapping.MaxLength, Width = 160
+                AllowZeroLength = !mapping.PrimaryKey, MaxLength = mapping.MaxLength, Width = 160
             });
             ordinals.Add(ordinal);
         }

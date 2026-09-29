@@ -148,9 +148,29 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await button('Browse / Connect', true); await status(/records 1–3/); checks++;
         await edit('Local table name', 'JSON_URL_Import_Test'); await button('Import table', true);
         assert.equal((await saveTable('JSON_URL_Import_Test', 3)).Records[0].Values.title, 'JSON Żółć 😀'); checks++;
+        // Reuse the source dialog's field-properties editor through native keyboard input.
+        await button('External Data'); await button('JSON File');
+        await edit('JSON Pointer', '/data/items');
+        const choosingMapped = page.waitForEvent('filechooser'); await button('Browse / Connect', true); await (await choosingMapped).setFiles(json);
+        await status(/records 1–3/); await edit('Local table name', 'Mapped_Import_Test');
+        await button('Field Options', true);
+        await edit('Destination field name', 'ExternalID');
+        await selectIndex('Import data type', 0); // Explicitly preserve IDs as Short Text.
+        await edit('Short Text maximum length', '20');
+        const generated = peer('checkbox', 'Add AutoNumber primary key'); await focusNative(generated, 'Add AutoNumber primary key'); await page.keyboard.press('Space');
+        await edit('Generated key field name', 'RowID');
+        await selectIndex('Source field', 4); // Drop the fixture's all-null "missing" column.
+        const skip = peer('checkbox', 'Do not import field (Skip)'); await focusNative(skip, 'Skip field'); await page.keyboard.press('Space');
+        await button('Data Preview', true); await button('Field Options', true);
+        await page.screenshot({ path: screenshots + '/import-field-options.png', fullPage: true });
+        await button('Import table', true); const mapped = await saveTable('Mapped_Import_Test', 3);
+        assert.deepEqual(mapped.Fields.map(field => field.Name), ['RowID', 'ExternalID', 'title', 'active', 'empty']); checks++;
+        assert.equal(mapped.Fields[0].Type, 'AutoNumber'); assert.equal(mapped.Fields[0].PrimaryKey, true); assert.equal(mapped.NextAutoNumber, 4); checks++;
+        assert.equal(mapped.Fields[1].Type, 'ShortText'); assert.equal(mapped.Records[2].Values.ExternalID, '3'); assert.equal(mapped.Records[2].Values.RowID, '3'); checks++;
         await page.reload({ waitUntil: 'domcontentloaded' }); await ready();
         const saved = await database(); assert.equal(saved.Tables.find(t => t.Name === 'SQLite_Import_Test').Records.length, 403); checks++;
         assert.ok(!JSON.stringify(saved).includes('DataSpace_browser_test_token_only_46')); checks++;
+        assert.equal(saved.Tables.find(t => t.Name === 'Mapped_Import_Test').Fields.length, 5); checks++;
         await writeFile(screenshots + '/external-source-checks.json', JSON.stringify({ checks, sqliteRows: 403, jsonRows: 3, workerInt64Exact: true, sourceWrites: false }, null, 2));
         return checks;
     } catch (error) {
