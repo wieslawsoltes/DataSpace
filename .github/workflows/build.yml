@@ -31,6 +31,8 @@ jobs:
         run: python3 scripts/check-duplicate-detail-sql.py
       - name: Test database, query and storage libraries
         run: dotnet test tests/DataSpace.Tests/DataSpace.Tests.csproj -c Release --logger 'trx;LogFileName=tests.trx'
+      - name: Test JSON, native SQLite and authenticated gateway
+        run: dotnet test tests/DataSpace.DataSources.Tests/DataSpace.DataSources.Tests.csproj -c Release --filter 'Category!=Online' --logger 'trx;LogFileName=sources.trx'
       - name: Measure reproducible engine scenarios
         run: dotnet run --project benchmarks/DataSpace.Benchmarks/DataSpace.Benchmarks.csproj -c Release -- artifacts/performance.json
       - uses: actions/upload-artifact@v4
@@ -136,10 +138,51 @@ jobs:
           path: artifacts/site
           include-hidden-files: true
           if-no-files-found: error
+  online-databases:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: DataSpace_CI_Only_46
+          POSTGRES_DB: dataspace
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: DataSpace_CI_Only_46
+          MARIADB_DATABASE: dataspace
+        ports: ['3306:3306']
+        options: --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 5s --health-retries 20
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: DataSpace_CI_Only_46!
+          MSSQL_PID: Developer
+        ports: ['1433:1433']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test live PostgreSQL, MariaDB and SQL Server
+        env:
+          DS_TEST_POSTGRES: Host=localhost;Database=dataspace;Username=postgres;Password=DataSpace_CI_Only_46;SSL Mode=Disable
+          DS_TEST_MYSQL: Server=127.0.0.1;Database=dataspace;User ID=root;Password=DataSpace_CI_Only_46;SslMode=None
+          DS_TEST_SQLSERVER: Server=127.0.0.1,1433;Database=master;User ID=sa;Password=DataSpace_CI_Only_46!;Encrypt=False
+        run: dotnet test tests/DataSpace.DataSources.Tests/DataSpace.DataSources.Tests.csproj -c Release --filter 'Category=Online' --logger 'trx;LogFileName=online.trx'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: online-database-tests
+          path: '**/TestResults/*.trx'
   deploy:
     # Release dry runs call this workflow from main; only this workflow's own runs deploy Pages.
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.workflow == 'Build, test and deploy'
-    needs: [engine, application]
+    needs: [engine, application, online-databases]
     runs-on: ubuntu-latest
     permissions:
       pages: write
