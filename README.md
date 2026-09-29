@@ -4,6 +4,8 @@
 
 [![Build, test and deploy](https://github.com/wieslawsoltes/DataSpace/actions/workflows/build.yml/badge.svg)](https://github.com/wieslawsoltes/DataSpace/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Core.svg?label=NuGet)](https://www.nuget.org/packages/DataSpace.Core)
+[![Downloads](https://img.shields.io/nuget/dt/DataSpace.Core.svg)](https://www.nuget.org/packages/DataSpace.Core)
 
 [Browser application](https://wieslawsoltes.github.io/DataSpace/) · [Architecture](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Performance](docs/PERFORMANCE.md) · [Contributing](CONTRIBUTING.md)
 
@@ -64,44 +66,198 @@ Every [release](https://github.com/wieslawsoltes/DataSpace/releases) ships a sel
 
 Extract and run `DataSpace` (`DataSpace.exe` on Windows). Builds are not code-signed yet: on macOS clear the quarantine flag with `xattr -d com.apple.quarantine DataSpace`; on Windows choose **More info → Run anyway** in SmartScreen. Verify downloads against `SHA256SUMS.txt`.
 
-The libraries below are published to [NuGet.org](https://www.nuget.org/packages?q=DataSpace), e.g. `dotnet add package DataSpace.Query --prerelease` (preview versions need `--prerelease`).
+## NuGet packages
 
-## Independently reusable libraries
+DataSpace ships as five MIT-licensed packages on [NuGet.org](https://www.nuget.org/packages?q=DataSpace), versioned together and published by version tags with symbol packages (`.snupkg`) and SourceLink. All five target `net10.0`. `DataSpace.Core`, `DataSpace.Query` and `DataSpace.Storage` have no UI or graphics dependency, `DataSpace.Rendering` needs only SkiaSharp 4.152, and `DataSpace.Controls` is an Uno Platform (Skia renderer) library that ships one portable `net10.0` asset and is compiled through both the desktop and WebAssembly app heads. None depends on `DataSpace.App`; the thin app only injects platform file dialogs and browser interop. Current versions are previews, so pass `--prerelease`.
 
-| Package | Responsibility |
-| --- | --- |
-| `DataSpace.Core` | Model, typed values, validation, record/schema/index transactions, history, snapshots and document codec. |
-| `DataSpace.Query` | SQL parsing/evaluation, QBE/Find models, subqueries, query statistics and lazy identity-preserving table views. |
-| `DataSpace.Storage` | CSV, optimistic storage contracts/adapters and asynchronous save-session coordination. |
-| `DataSpace.Rendering` | Independent Skia datasheet, form, relationship, report and icon renderers. |
-| `DataSpace.Controls` | Reusable Uno ribbon/navigation/datasheet, object designers, query builders, resource styles and optional full workspace shell. |
+```sh
+dotnet add package DataSpace.Core --prerelease
+```
 
-None depends on `DataSpace.App`. The thin app injects platform file dialogs and browser interop. CI packages all five libraries; version tags attach them to GitHub Releases and publish them, with symbols, to NuGet.org. The controls library uses a portable `net10.0` package asset and is compiled through both app heads.
+| Package | Version | Downloads | Description |
+| --- | --- | --- | --- |
+| [DataSpace.Core](https://www.nuget.org/packages/DataSpace.Core) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Core.svg)](https://www.nuget.org/packages/DataSpace.Core) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Core.svg)](https://www.nuget.org/packages/DataSpace.Core) | Typed document model, validation, relational constraints, record/schema/index transactions, history and document codec |
+| [DataSpace.Query](https://www.nuget.org/packages/DataSpace.Query) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Query.svg)](https://www.nuget.org/packages/DataSpace.Query) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Query.svg)](https://www.nuget.org/packages/DataSpace.Query) | Managed SQL parser and evaluator, QBE/crosstab/Find designs, subqueries, statistics and lazy table views |
+| [DataSpace.Storage](https://www.nuget.org/packages/DataSpace.Storage) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Storage.svg)](https://www.nuget.org/packages/DataSpace.Storage) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Storage.svg)](https://www.nuget.org/packages/DataSpace.Storage) | CSV interchange, optimistic versioned storage contracts/adapters and save-session coordination |
+| [DataSpace.Rendering](https://www.nuget.org/packages/DataSpace.Rendering) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Rendering.svg)](https://www.nuget.org/packages/DataSpace.Rendering) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Rendering.svg)](https://www.nuget.org/packages/DataSpace.Rendering) | UI-independent SkiaSharp datasheet, relationship, form, report/PDF and icon renderers |
+| [DataSpace.Controls](https://www.nuget.org/packages/DataSpace.Controls) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Controls.svg)](https://www.nuget.org/packages/DataSpace.Controls) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Controls.svg)](https://www.nuget.org/packages/DataSpace.Controls) | Uno ribbon, navigation, datasheet, object designers, query builders, styles and optional full workspace shell |
 
-### Engine usage without Uno
+Dependencies follow the real project references: `Core ← Query`, `Core ← Storage`, `Core ← Rendering`, and `Core + Query + Storage + Rendering ← Controls`.
+
+Only mutate live data through `DatabaseWorkspace.Edit` or `UpdateRecords`. Public models remain mutable for construction/serialization, but direct mutation bypasses history, validation and cache guarantees. Virtual-view records are detached display snapshots, not backing storage. Dispose owned views, renderers and sessions when their host is finished.
+
+### DataSpace.Core
+
+The database document and its transactional workspace: tables with typed fields, records, indexes, relationships with referential checks and cascades, saved queries, forms, reports and macros. Every edit runs against a draft, is validated (required/default/primary/unique constraints, indexes, relationships) and becomes one undoable step. Use it on its own as an embeddable in-memory relational document. No dependencies and no UI.
+
+```sh
+dotnet add package DataSpace.Core --prerelease
+```
+
+**Key types**
+
+- `DatabaseWorkspace` — current `Document`, `Edit`, `UpdateRecords`, `Undo`/`Redo`, `Replace`, `Changed`.
+- `DatabaseDocument`, `TableDefinition`, `FieldDefinition` (`FieldType`), `Record` — the model.
+- `RecordOperations` — `Insert`, `Update`, `Delete`, `AddField`, `RenameField` inside an edit.
+- `ObjectFactory` — creates tables, queries, forms, reports and macros with unique names.
+- `DocumentCodec` — versioned `.dspace` JSON `Serialize`/`Deserialize`; `SchemaValidator` for explicit checks.
+- `SampleDatabase.Create` — the Northwind-style demonstration database.
+
+**Usage**
+
+```csharp
+using DataSpace.Core;
+
+var workspace = new DatabaseWorkspace(new DatabaseDocument { Name = "Inventory" });
+workspace.Edit("Create table", document =>
+{
+    var table = ObjectFactory.CreateTable(document);   // "Table1" with ID (AutoNumber) and Title
+    RecordOperations.AddField(table, new FieldDefinition { Name = "Price", Type = FieldType.Currency });
+});
+workspace.Edit("Add record", document => RecordOperations.Insert(
+    document.Table("Table1"), new Dictionary<string, string?> { ["Title"] = "Notebook", ["Price"] = "4.50" }));
+
+var record = workspace.Document.Table("Table1").Records[0];
+workspace.UpdateRecords("Edit title", "Table1", [new RecordEdit(record.Id, "Title", "Drawing pad")]);
+workspace.Undo();                                       // Title is "Notebook" again
+
+string json = DocumentCodec.Serialize(workspace.Document);
+var reopened = new DatabaseWorkspace(DocumentCodec.Deserialize(json));
+```
+
+### DataSpace.Query
+
+A managed SQL engine over a `DatabaseDocument`: streaming SELECT/TOP, joins (with transient hash joins), grouping and aggregates, UNION/UNION ALL, saved queries as sources, parameters, correlated scalar/EXISTS/IN/ANY/ALL subqueries, TRANSFORM crosstabs, and atomic INSERT/UPDATE/DELETE/SELECT INTO action queries through the workspace. It also contains the graphical QBE, crosstab and Find Duplicates/Unmatched designs that round-trip to SQL, and lazy datasheet views. Explicit `QueryOptions` limits bound the work. Depends on `DataSpace.Core`; no UI. See [query analytics](docs/QUERY-ANALYTICS.md) and [subqueries](docs/SUBQUERIES.md).
+
+```sh
+dotnet add package DataSpace.Query --prerelease
+```
+
+**Key types**
+
+- `QueryEngine` — `Select(document, sql, parameters)`, `Execute(workspace, sql)` for undoable action queries, `IsReadOnly`.
+- `QueryResult` / `QueryStatistics` — result `Fields`/`Records`, affected rows, duration and work counters.
+- `QueryOptions` — limits and optimizations (subquery cache, hash joins, row caps).
+- `TableView.Open` → `VirtualTableView` — lazily materialized, filtered/sorted rows with `ReadPage`.
+- `QueryDesign`, `CrosstabDesign`, `FindQueryDesign` — designer models that generate SQL (`ToSql`).
+
+**Usage**
 
 ```csharp
 using DataSpace.Core;
 using DataSpace.Query;
 
-var workspace = new DatabaseWorkspace(new DatabaseDocument { Name = "Inventory" });
-workspace.Edit("Create table", document => ObjectFactory.CreateTable(document));
-workspace.Edit("Add record", document => RecordOperations.Insert(
-    document.Table("Table1"), new Dictionary<string, string?> { ["Title"] = "Notebook" }));
+var workspace = new DatabaseWorkspace(SampleDatabase.Create());
+var engine = new QueryEngine();
 
-var view = TableView.Open(workspace.Document, "Table1", sortField: "Title");
-var firstPage = view.ReadPage(0, 50);
-workspace.UpdateRecords("Edit title", "Table1", [new(firstPage[0].Id, "Title", "Drawing pad")]);
-var result = new QueryEngine().Select(workspace.Document,
-    "SELECT ID, Title FROM Table1 UNION ALL SELECT 0, 'Unassigned' ORDER BY Title");
-workspace.Undo();
+QueryResult sales = engine.Select(workspace.Document,
+    "SELECT c.[Company], Count(o.[ID]) AS [Orders] FROM [Customers] AS c " +
+    "INNER JOIN [Orders] AS o ON c.[ID] = o.[Customer ID] WHERE c.[Country] = [Country?] GROUP BY c.[Company]",
+    new Dictionary<string, object?> { ["Country?"] = "UK" });
+foreach (var row in sales.Records)
+    Console.WriteLine($"{row["Company"]}: {row["Orders"]}");
+
+var products = TableView.Open(workspace.Document, "Products", sortField: "Product Name");
+IReadOnlyList<Record> firstPage = products.ReadPage(0, 50);   // only these rows are materialized
+
+engine.Execute(workspace, "UPDATE [Products] SET [Unit Price] = [Unit Price] * 1.1 WHERE [Category] = 'Beverages'");
+workspace.Undo();                                              // action queries are one undo step
 ```
 
-Only mutate live data through `DatabaseWorkspace.Edit` or `UpdateRecords`. Public models remain mutable for construction/serialization, but direct mutation bypasses history, validation and cache guarantees. Virtual-view records are detached display snapshots, not backing storage. Use `TableView.Select` for the compatible eager result API.
+### DataSpace.Storage
 
-### Embed the workspace
+Persistence around the workspace: quoted CSV parsing, import with type inference and export with spreadsheet-formula protection, an optimistic `IWorkspaceStore` contract (compare the expected version and replace atomically) with memory and file adapters, and `WorkspaceSession`, which loads once, tracks the saved snapshot and saves only that snapshot. Depends on `DataSpace.Core`; no UI. The browser app implements the same contract over IndexedDB.
+
+```sh
+dotnet add package DataSpace.Storage --prerelease
+```
+
+**Key types**
+
+- `CsvCodec` — `Parse`, `Import` (to a `TableDefinition`) and `Export`; `CsvOptions` for delimiter, headers, inference and limits.
+- `IWorkspaceStore` / `StoredWorkspace` — version-checked load/save contract.
+- `MemoryWorkspaceStore`, `FileWorkspaceStore` — in-memory and atomic file adapters.
+- `WorkspaceSession` — `InitializeAsync`, `IsDirty`, `SaveAsync` for a `DatabaseWorkspace`.
+
+**Usage**
 
 ```csharp
+using DataSpace.Core;
+using DataSpace.Storage;
+
+TableDefinition contacts = CsvCodec.Import("Contacts", "Name,Age\nAda,36\nAlan,41\n");  // types inferred
+string csv = CsvCodec.Export(contacts.Fields, contacts.Records, new CsvOptions { Delimiter = ';' });
+
+var workspace = new DatabaseWorkspace(new DatabaseDocument { Name = "Contacts" });
+using var session = new WorkspaceSession(workspace, new FileWorkspaceStore("data/contacts.store"));
+await session.InitializeAsync();                   // replaces the document if one is stored
+
+workspace.Edit("Import contacts", document => document.Tables.Add(contacts));
+if (session.IsDirty)
+    await session.SaveAsync();                     // fails instead of overwriting a newer version
+```
+
+### DataSpace.Rendering
+
+Framework-independent SkiaSharp renderers for the database views: a viewport-only datasheet with selection, a new-record row and cached totals; a relationship diagram; form layouts; report pages shared by preview and PDF export; and Office-style vector icons, all with deterministic hit testing. Use it to draw or export DataSpace objects without Uno. Depends on `DataSpace.Core` and SkiaSharp 4.152; no UI framework.
+
+```sh
+dotnet add package DataSpace.Rendering --prerelease
+```
+
+**Key types**
+
+- `DatasheetRenderer` + `DatasheetViewState` — `Draw`, `HitTest` (→ `GridHit`), `CellBounds`, content size.
+- `RelationshipRenderer` + `RelationshipViewState` — table cards and relationship lines with `HitTest`.
+- `FormLayoutRenderer` — form design surface with control hit testing.
+- `ReportRenderer` / `ReportPageLayout` — `DrawPage` and `ExportPdf`.
+- `OfficeTheme`, `DrawingResources`, `IconRenderer` — colors, cached paints/fonts and icons.
+
+**Usage**
+
+```csharp
+using DataSpace.Core;
+using DataSpace.Rendering;
+using SkiaSharp;
+
+var document = SampleDatabase.Create();
+var products = document.Table("Products");
+
+using var datasheet = new DatasheetRenderer();
+var state = new DatasheetViewState { ShowTotals = true, ReadOnly = true };
+using var surface = SKSurface.Create(new SKImageInfo(900, 400));
+datasheet.Draw(surface.Canvas, 900, 400, products.Fields, products.Records, state);
+GridHit hit = datasheet.HitTest(products.Fields, products.Records.Count, state, 200, 60);   // Kind, Row, Column
+
+var report = document.Reports.First(r => r.Name == "Customer Directory");
+var source = document.Table(report.Source);
+using var reports = new ReportRenderer();
+File.WriteAllBytes("customer-directory.pdf", reports.ExportPdf(report, source.Fields, source.Records));
+```
+
+### DataSpace.Controls
+
+Reusable Office-style Uno Platform controls: ribbon, navigation pane, tab strip and record navigator; the virtualized `DatasheetControl`; table, index, query (SQL and QBE), crosstab, Find, form, report, relationship and macro designers; resource styles; and the optional full `DatabaseWorkspaceView` shell. Individual controls and designers do not require the shell. Depends on Core, Query, Storage, Rendering and `SkiaSharp.Views.Uno.WinUI`; requires Uno Platform with the Skia renderer. Merge `ms-appx:///DataSpace.Controls/Themes/OfficeResources.xaml` into your application resources for the supplied styling.
+
+```sh
+dotnet add package DataSpace.Controls --prerelease
+```
+
+**Key types**
+
+- `DatabaseWorkspaceView` — the complete studio; inject `SaveDatabaseAsync`, `StorageIsDirty`, `ImportTextAsync`, `ExportFileAsync`.
+- `DatasheetControl` — `SetData`, `CommitEdits` (`CellEdit`), selection, clipboard, zoom and totals.
+- `TableDesignerControl`, `QueryEditorControl`, `QueryDesignerControl`, `RelationshipDesignerControl`, `ReportPreviewControl` — object editors bound to a `DatabaseWorkspace`.
+- `OfficeRibbon`, `NavigationPane`, `DocumentTabStrip`, `RecordNavigator` — shell building blocks.
+
+**Usage**
+
+```csharp
+using DataSpace.Controls;
+using DataSpace.Core;
+using DataSpace.Storage;
+using Microsoft.UI.Xaml;
+
 var workspace = new DatabaseWorkspace(SampleDatabase.Create());
 var session = new WorkspaceSession(workspace, new MemoryWorkspaceStore());
 await session.InitializeAsync();
@@ -109,12 +265,17 @@ var view = new DatabaseWorkspaceView(workspace)
 {
     StorageIsDirty = () => session.IsDirty,
     SaveDatabaseAsync = () => session.SaveAsync()
+    // Inject ImportTextAsync and ExportFileAsync for your file-dialog or document-management integration.
 };
-// Put view in your Uno page/window. Inject ImportTextAsync and ExportFileAsync
-// for your file-dialog or document-management integration.
-```
 
-The embedding example uses `DataSpace.Core`, `DataSpace.Storage` and `DataSpace.Controls`. Merge `ms-appx:///DataSpace.Controls/Themes/OfficeResources.xaml` for supplied styling. Individual controls and designers do not require the shell. Dispose owned views, renderers and sessions when their host is finished.
+var window = new Window { Title = "DataSpace", Content = view };
+window.Activate();
+
+// A single control without the shell:
+var sheet = new DatasheetControl();
+var products = workspace.Document.Table("Products");
+sheet.SetData(products.Fields, products.Records, readOnly: true);
+```
 
 ## Performance and verification
 
