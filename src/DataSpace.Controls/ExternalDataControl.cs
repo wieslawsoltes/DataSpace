@@ -23,6 +23,7 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
     private readonly StackPanel _connectionFields = new() { Spacing = 7 };
     private readonly StackPanel _pointerFields = new() { Spacing = 7 };
     private readonly StackPanel _tokenFields = new() { Spacing = 7 };
+    private readonly StackPanel _catalogFields = new() { Spacing = 7 };
     private IDataSource? _source;
     private SourcePager? _pager;
     private CancellationTokenSource? _operation;
@@ -51,12 +52,12 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         AutomationProperties.SetAutomationId(_address, "SourceEndpoint"); AutomationProperties.SetAutomationId(_pointer, "SourceJsonPointer"); AutomationProperties.SetAutomationId(_token, "SourceAccessToken");
         _hint.TextWrapping = TextWrapping.Wrap; left.Children.Add(_hint);
         _connect = OfficeVisuals.Button("Browse / Connect", () => Run(ConnectAsync), "open", "SourceConnect"); left.Children.Add(_connect);
-        EditorVisuals.Labeled(left, "Available databases", _sourceList); AutomationProperties.SetAutomationId(_sourceList, "GatewaySources");
+        EditorVisuals.Labeled(_catalogFields, "Available databases", _sourceList); left.Children.Add(_catalogFields); AutomationProperties.SetAutomationId(_sourceList, "GatewaySources");
         EditorVisuals.Labeled(left, "Tables", _tables); AutomationProperties.SetAutomationId(_tables, "SourceTables");
         left.Children.Add(OfficeVisuals.Text("Import options", 15, bold: true));
         EditorVisuals.Labeled(left, "Local table name", _name); AutomationProperties.SetAutomationId(_name, "SourceImportName");
         EditorVisuals.Labeled(left, "Maximum imported records", _maximum);
-        OfficeVisuals.Add(root, OfficeVisuals.Border(EditorVisuals.Scroll(left), "F5F5F5", thickness: new(0, 0, 1, 0)), 1);
+        OfficeVisuals.Add(root, OfficeVisuals.Border(new ScrollViewer { Content = left, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, "F5F5F5", thickness: new(0, 0, 1, 0)), 1);
         var right = OfficeVisuals.Grid("Auto,Auto,*,Auto"); right.Margin = new(14, 0, 0, 0);
         var label = OfficeVisuals.Text("Read-only preview", 15, bold: true); label.Margin = new(0, 0, 0, 8); OfficeVisuals.Add(right, label);
         OfficeVisuals.Add(right, _error, 1); OfficeVisuals.Add(right, _preview, 2);
@@ -84,7 +85,7 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         _connectionFields.Visibility = mode == "JSON URL" || remote ? Visibility.Visible : Visibility.Collapsed;
         _tokenFields.Visibility = remote ? Visibility.Visible : Visibility.Collapsed;
         _pointerFields.Visibility = mode.StartsWith("JSON", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
-        _sourceList.Visibility = remote ? Visibility.Visible : Visibility.Collapsed;
+        _catalogFields.Visibility = remote ? Visibility.Visible : Visibility.Collapsed;
         _hint.Text = remote ? "Connect to a DataSpace gateway configured for your database. Database connection strings are entered on the server, not here." : mode == "SQLite file" ? "Open a local SQLite file (up to 16 MiB). The source is read-only; imports and exports create separate copies." : "Use an array of objects. Nested values and non-integer numbers are preserved as text; the optional pointer selects a nested array.";
     }
     private async void Run(Func<CancellationToken, Task> action)

@@ -29,7 +29,7 @@ public static class SourceLimits
     public const int MaxPageRows = 1000, MaxOffset = 1_000_000, MaxColumns = 128;
     public const int MaxFileBytes = 16 * 1024 * 1024, MaxPageBytes = 4 * 1024 * 1024;
     public const int MaxCellCharacters = 1_000_000, MaxImportRows = 100_000;
-    public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { TypeInfoResolver = SourceJsonContext.Default };
     public static void Validate(SourcePage page, int requestedRows)
     {
         if (page.Columns.Length is < 1 or > MaxColumns || page.Rows.Length > requestedRows)

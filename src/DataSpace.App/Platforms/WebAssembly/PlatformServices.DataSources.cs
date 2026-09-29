@@ -28,7 +28,7 @@ internal static partial class PlatformServices
     public static async Task<byte[]> ExportSqliteAsync(string name, FieldDefinition[] fields, Record[] rows, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested(); await LoadSqliteAsync();
-        var json = JsonSerializer.Serialize(new { name, columns = fields.Select(f => f.Name), rows = rows.Select(r => fields.Select(f => r[f.Name]).ToArray()) });
+        var json = JsonSerializer.Serialize(new SqliteExport(name, fields.Select(f => f.Name).ToArray(), rows.Select(r => fields.Select(f => r[f.Name]).ToArray()).ToArray()), SourceLimits.Json);
         if (System.Text.Encoding.UTF8.GetByteCount(json) > SourceLimits.MaxFileBytes) throw new DataSpaceException("SQLite export exceeds 16 MiB.");
         var output = await ExportSqliteJsonAsync(json); cancellationToken.ThrowIfCancellationRequested(); return Convert.FromBase64String(output);
     }

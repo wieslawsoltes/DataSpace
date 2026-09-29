@@ -49,8 +49,18 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         if (dialog) await activateDialogButton(page, target, name); else await target.press('Enter');
         await page.waitForTimeout(200);
     }
+    async function focusNative(target, name) {
+        await target.waitFor({ state: 'attached' });
+        for (const key of ['Tab', 'Shift+Tab']) {
+            for (let step = 0; step < 35; step++) {
+                await page.keyboard.press(key); await page.waitForTimeout(80);
+                if (await target.evaluate(e => e.ownerDocument.activeElement === e)) return;
+            }
+        }
+        throw new Error(name + ' is not reachable through native keyboard navigation.');
+    }
     async function edit(name, value) {
-        const input = peer('textbox', name); await input.focus(); await page.waitForTimeout(150);
+        const input = peer('textbox', name); await focusNative(input, name);
         await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.insertText(value); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
         assert.equal(await input.inputValue(), value);
     }
@@ -86,7 +96,8 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await button('SQLite');
         const choosingSqlite = page.waitForEvent('filechooser'); await button('Browse / Connect', true); await (await choosingSqlite).setFiles(sqlite);
         // Alphabetical SQLite table order begins with exact_values. Choose items through the native combo.
-        const tables = peer('combobox', 'Tables'); await tables.press('Home'); await tables.press('ArrowDown'); await tables.press('Enter');
+        await status(/records 1–1/);
+        const tables = peer('combobox', 'Tables'); await focusNative(tables, 'Tables'); await page.keyboard.press('Home'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
         await status(/records 1–200/); checks++;
         await button('Next ▶', true); await status(/records 201–400/);
         await button('◀ Previous', true); await status(/cache hits/); checks++;

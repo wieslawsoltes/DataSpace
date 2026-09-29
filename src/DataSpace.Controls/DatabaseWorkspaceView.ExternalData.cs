@@ -9,7 +9,7 @@ public sealed partial class DatabaseWorkspaceView
     {
         await using var editor = new ExternalDataControl(ImportTextAsync, OpenSqliteAsync, provider);
         editor.NameAvailable = name => !Workspace.Document.Tables.Any(t => Names.Equal(t.Name, name));
-        editor.Width = Math.Max(660, Math.Min(1080, XamlRoot.Size.Width - 100)); editor.Height = Math.Max(380, Math.Min(660, XamlRoot.Size.Height - 180));
+        editor.Width = Math.Max(660, Math.Min(1080, XamlRoot.Size.Width - 100)); editor.Height = Math.Max(320, Math.Min(500, XamlRoot.Size.Height - 300));
         var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "External Data", Content = editor, CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
         dialog.Resources["ContentDialogMaxWidth"] = 1200d;
         editor.ImportCompleted += () => dialog.Hide();
