@@ -10,10 +10,12 @@ public sealed class JsonDataSource : IDataSource
 {
     private readonly JsonDocument _document;
     private readonly JsonElement _rows;
+    private readonly JsonElement[] _rowIndex;
+    private readonly Dictionary<string, int> _ordinals;
     private readonly SourceTable _table;
     private bool _disposed;
     public string DisplayName { get; }
-    public int RowCount => _rows.GetArrayLength();
+    public int RowCount => _rowIndex.Length;
     public long MaterializedRows { get; private set; }
 
     public JsonDataSource(string json, string displayName = "JSON", string pointer = "")
@@ -43,6 +45,10 @@ public sealed class JsonDataSource : IDataSource
             }
             if (columns.Count == 0) throw new DataSpaceException("An empty JSON array has no discoverable columns. Supply at least one object with fields.");
             _table = new("data", "JSON data", columns.Select(c => new SourceColumn(c.Key, c.Value == "null" ? "text" : c.Value, "JSON")).ToArray(), []);
+            // JsonElement array indexing scans preceding JSON tokens. Keep small
+            // element handles for O(1) random-page starts, not decoded row graphs.
+            _rowIndex = _rows.EnumerateArray().ToArray();
+            _ordinals = _table.Columns.Select((column, index) => (column.Name, index)).ToDictionary(c => c.Name, c => c.index, StringComparer.Ordinal);
         }
         catch { _document.Dispose(); throw; }
     }
@@ -73,7 +79,7 @@ public sealed class JsonDataSource : IDataSource
                 if (part[i] == '~' && (++i == part.Length || part[i] is not ('0' or '1'))) throw new DataSpaceException("Invalid JSON Pointer escape.");
             var key = part.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal);
             if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty(key, out var child)) root = child;
-            else if (root.ValueKind == JsonValueKind.Array && int.TryParse(key, NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index >= 0 && index < root.GetArrayLength()) root = root[index];
+            else if (root.ValueKind == JsonValueKind.Array && (key == "0" || key.Length > 0 && key[0] != '0') && int.TryParse(key, NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index >= 0 && index < root.GetArrayLength()) root = root[index];
             else throw new DataSpaceException("The JSON Pointer does not resolve to an existing value.");
         }
         return root;
@@ -85,14 +91,16 @@ public sealed class JsonDataSource : IDataSource
     }
     public Task<SourcePage> ReadAsync(SourceRequest request, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this); request.Validate();
+        ObjectDisposedException.ThrowIf(_disposed, this); request.Validate(); cancellationToken.ThrowIfCancellationRequested();
         if (request.Table != "data") throw new DataSpaceException("JSON table not found.");
         var result = new List<string?[]>();
         var end = Math.Min((long)request.Offset + request.Limit, RowCount);
         for (var index = request.Offset; index < end; index++)
         {
-            cancellationToken.ThrowIfCancellationRequested(); var row = _rows[index];
-            result.Add(_table.Columns.Select(c => row.TryGetProperty(c.Name, out var value) ? Text(value) : null).ToArray());
+            cancellationToken.ThrowIfCancellationRequested(); var row = _rowIndex[index];
+            var cells = new string?[_table.Columns.Length];
+            foreach (var property in row.EnumerateObject()) cells[_ordinals[property.Name]] = Text(property.Value);
+            result.Add(cells);
         }
         var page = new SourcePage(_table.Columns.ToArray(), result.ToArray(), end < RowCount);
         SourceLimits.Validate(page, request.Limit); MaterializedRows += result.Count; return Task.FromResult(page);

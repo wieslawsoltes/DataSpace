@@ -9,6 +9,8 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
     const sqlite = resolve('artifacts/external/items.sqlite');
     const json = resolve('artifacts/external/items.json');
     const fixture = [...await readFile(sqlite)];
+    // Public test fixture on the already-running same-origin static test server.
+    await writeFile(resolve('artifacts/server/DataSpace/source-fixture.json'), await readFile(json));
     const worker = await page.context().newPage();
     try {
         await worker.goto(new URL('storage-test.html', baseURL).href);
@@ -114,6 +116,24 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
             finally { client.close(); }
         }, { baseURL, bytes: [...bytes] });
         assert.equal(verified.rows.length, 3); checks++;
+        // Exercise the .NET HTTP adapters through the actual Uno dialog, not
+        // just a JavaScript fetch. The CI gateway exposes a disposable SQLite table.
+        await button('External Data'); await button('Online Database');
+        await edit('Endpoint URL', 'http://127.0.0.1:5099/');
+        const token = peer('textbox', 'Gateway access token'); await focusNative(token, 'Gateway access token');
+        await page.keyboard.insertText('DataSpace_browser_test_token_only_46'); await page.keyboard.press('Tab');
+        await button('Browse / Connect', true); await status(/CI_SQLite.*records 1–200/); checks++;
+        await edit('Local table name', 'Gateway_Import_Test');
+        await page.screenshot({ path: screenshots + '/online-source-preview.png', fullPage: true });
+        await button('Import table', true); const remoteTable = await saveTable('Gateway_Import_Test', 403);
+        assert.equal(remoteTable.Records[0].Values.title, 'External row 1 Żółć 😀'); checks++;
+        await button('External Data'); await button('New Data Source');
+        const provider = peer('combobox', 'Source type'); await focusNative(provider, 'Source type');
+        await page.keyboard.press('Home'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+        await edit('Endpoint URL', new URL('source-fixture.json', baseURL).href); await edit('JSON Pointer', '/data/items');
+        await button('Browse / Connect', true); await status(/records 1–3/); checks++;
+        await edit('Local table name', 'JSON_URL_Import_Test'); await button('Import table', true);
+        assert.equal((await saveTable('JSON_URL_Import_Test', 3)).Records[0].Values.title, 'JSON Żółć 😀'); checks++;
         await page.reload({ waitUntil: 'domcontentloaded' }); await ready();
         const saved = await database(); assert.equal(saved.Tables.find(t => t.Name === 'SQLite_Import_Test').Records.length, 403); checks++;
         assert.ok(!JSON.stringify(saved).includes('DataSpace_browser_test_token_only_46')); checks++;

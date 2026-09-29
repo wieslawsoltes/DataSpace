@@ -17,7 +17,7 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
     private readonly NumberBox _maximum = new() { Value = 10000, Minimum = 1, Maximum = SourceLimits.MaxImportRows, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
     private readonly DatasheetControl _preview = new();
     private readonly ValidationMessageControl _error = new();
-    private readonly TextBlock _status = OfficeVisuals.Text("Choose a source to preview its tables.", 12, "666666");
+    private readonly StatusMessageControl _status = new() { Text = "Choose a source to preview its tables." };
     private readonly TextBlock _hint = OfficeVisuals.Text("", 12, "666666");
     private readonly Button _connect, _previous, _next, _refresh, _import, _cancel;
     private readonly StackPanel _connectionFields = new() { Spacing = 7 };
@@ -67,7 +67,7 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         var navigation = OfficeVisuals.Row(_previous, _next, _refresh); navigation.Margin = new(0, 8, 0, 0); OfficeVisuals.Add(right, navigation, 3);
         OfficeVisuals.Add(root, right, 1, 1);
         var footer = OfficeVisuals.Grid("Auto,Auto", "*,Auto,Auto"); footer.Margin = new(14, 12, 0, 0);
-        _status.TextWrapping = TextWrapping.Wrap; OfficeVisuals.Add(footer, _status);
+        OfficeVisuals.Add(footer, _status);
         _cancel = OfficeVisuals.Button("Cancel operation", () => _operation?.Cancel()); OfficeVisuals.Add(footer, _cancel, column: 1);
         _import = OfficeVisuals.Button("Import table", () => Run(ImportAsync), "table", "SourceImport"); OfficeVisuals.Add(footer, _import, column: 2);
         var note = OfficeVisuals.Text("Import creates a local snapshot. Source records are never modified. Online credentials stay on the gateway; this token is not saved.", 11, "666666"); note.TextWrapping = TextWrapping.Wrap; note.Margin = new(0, 8, 0, 0);
@@ -164,7 +164,7 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         if (source is not null) await source.DisposeAsync();
         if (!_disposed) UpdateButtons();
     }
-    private void SetStatus(string value) { _status.Text = value; AutomationProperties.SetName(_status, value); }
+    private void SetStatus(string value) => _status.Text = value;
     private void UpdateButtons()
     {
         _provider.IsEnabled = _connect.IsEnabled = _address.IsEnabled = _token.IsEnabled = _pointer.IsEnabled = !_busy;

@@ -150,8 +150,13 @@ if (duplicateFast.Statistics.SubqueryExecutions != 2 || duplicateFast.Statistics
 Pair("Duplicate details / 1,000 records / one text key including nulls", "Correlated counts with repeated-key cache enabled",
     () => duplicateEngine.Select(duplicates, duplicateReferenceSql), "Independent grouped membership and null count",
     () => duplicateEngine.Select(duplicates, duplicateSql), 3);
+using var sourcePaging = new SourcePagingScenario();
+Pair("Warm JSON page / 5,000 rows / 32 columns / offset 4,700 / 200 returned",
+    "Repeated JSON array indexing and per-column lookup", () => sourcePaging.ReferencePage(),
+    "Indexed row handles and one property enumeration", () => sourcePaging.IndexedPage());
 var output = new
 {
+    sourcePaging = sourcePaging.Evidence,
     runtime = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
     processorCount = Environment.ProcessorCount, configuration = "Release", measuredAtUtc = DateTime.UtcNow,
     scope = "Managed engine microbenchmarks, not browser or hardware-GPU measurements; no storage I/O. Timings are environment-dependent.",

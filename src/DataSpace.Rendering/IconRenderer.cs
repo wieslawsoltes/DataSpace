@@ -19,6 +19,23 @@ public static class IconRenderer
         }
         switch (icon)
         {
+            case "database":
+                using (var cylinder = new SKPath())
+                {
+                    cylinder.AddOval(new SKRect(3, 2, 21, 8));
+                    cylinder.MoveTo(3, 5); cylinder.LineTo(3, 19); cylinder.CubicTo(3, 23, 21, 23, 21, 19); cylinder.LineTo(21, 5);
+                    cylinder.MoveTo(3, 12); cylinder.CubicTo(3, 16, 21, 16, 21, 12);
+                    drawing.Path(canvas, cylinder, color, 1.5f);
+                }
+                break;
+            case "server":
+                Rect(3, 2, 18, 7); Rect(3, 12, 18, 7); Line(7, 5.5f, 14, 5.5f); Line(7, 15.5f, 14, 15.5f);
+                drawing.Circle(canvas, 18, 5.5f, 1, color); drawing.Circle(canvas, 18, 15.5f, 1, color); Line(12, 19, 12, 23); Line(5, 23, 19, 23); break;
+            case "json":
+                Path([8, 2, 5, 2, 5, 9, 2, 12, 5, 15, 5, 22, 8, 22]);
+                Path([16, 2, 19, 2, 19, 9, 22, 12, 19, 15, 19, 22, 16, 22]);
+                drawing.Circle(canvas, 12, 9, 1, color); drawing.Circle(canvas, 12, 15, 1, color); break;
+            case "check": Path([3, 12, 9, 18, 21, 5]); break;
             case "table": case "datasheet":
                 Rect(2, 3, 20, 18); Rect(2, 3, 20, 5, true, color.WithAlpha(65));
                 Line(2, 8, 22, 8); Line(2, 14, 22, 14); Line(8, 8, 8, 21); Line(15, 8, 15, 21); break;
@@ -46,7 +63,7 @@ public static class IconRenderer
             case "new": Rect(3, 2, 14, 19); Line(17, 12, 17, 22, SKColor.Parse("3B8245"), 2); Line(12, 17, 22, 17, SKColor.Parse("3B8245"), 2); break;
             case "filter": Path([2, 4, 22, 4, 15, 12, 15, 21, 9, 18, 9, 12], true); break;
             case "clear": Path([4, 4, 20, 20]); Path([20, 4, 4, 20]); break;
-            case "find": drawing.Circle(canvas, 10, 10, 7, color, false); Line(15, 15, 23, 23, width: 2.5f); break;
+            case "search": case "find": drawing.Circle(canvas, 10, 10, 7, color, false); Line(15, 15, 23, 23, width: 2.5f); break;
             case "replace": drawing.Text(canvas, "a", 1, 10, color, 12, true); drawing.Text(canvas, "b", 14, 23, color, 12, true); Path([9, 7, 20, 7, 17, 4]); Path([15, 17, 4, 17, 7, 20]); break;
             case "sort-asc": case "sort-desc":
                 drawing.Text(canvas, icon == "sort-asc" ? "A" : "Z", 1, 10, color, 10, true); drawing.Text(canvas, icon == "sort-asc" ? "Z" : "A", 1, 23, color, 10, true);
@@ -62,9 +79,9 @@ public static class IconRenderer
                 Rect(2, 3, 12, 18); var right = icon == "export";
                 Line(10, 12, 23, 12); if (right) Path([18, 7, 23, 12, 18, 17]); else Path([15, 7, 10, 12, 15, 17]); break;
             case "totals": Path([20, 3, 5, 3, 12, 12, 5, 21, 20, 21]); break;
-            case "folder": Path([2, 5, 9, 5, 12, 8, 22, 8, 22, 21, 2, 21], true); Line(2, 10, 22, 10); break;
+            case "open": case "folder": Path([2, 5, 9, 5, 12, 8, 22, 8, 22, 21, 2, 21], true); Line(2, 10, 22, 10); break;
             case "print": Rect(6, 2, 12, 7); Rect(2, 9, 20, 10); Rect(6, 15, 12, 7, true, SKColors.White); Rect(6, 15, 12, 7); drawing.Circle(canvas, 18, 12, 1, color); break;
-            case "help": drawing.Circle(canvas, 12, 12, 10, color, false); drawing.Text(canvas, "?", 8, 18, color, 17, true); break;
+            case "info": case "help": drawing.Circle(canvas, 12, 12, 10, color, false); drawing.Text(canvas, "?", 8, 18, color, 17, true); break;
             default: drawing.Circle(canvas, 12, 12, 8, color, false); Line(8, 12, 16, 12); Line(12, 8, 12, 16); break;
         }
         canvas.Restore();

@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><IsPackable>false</IsPackable></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../../src/DataSpace.Core/DataSpace.Core.csproj" /><ProjectReference Include="../../src/DataSpace.Query/DataSpace.Query.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../../src/DataSpace.Core/DataSpace.Core.csproj" /><ProjectReference Include="../../src/DataSpace.Query/DataSpace.Query.csproj" /><ProjectReference Include="../../src/DataSpace.DataSources/DataSpace.DataSources.csproj" /></ItemGroup>
 </Project>
