@@ -69,13 +69,15 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.insertText(value); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
         assert.equal(await input.inputValue(), value);
     }
-    async function selectIndex(name, index) {
+    async function selectIndex(name, index, currentIndex = 0) {
         const combo = peer('combobox', name); await focusNative(combo, name);
         // Open the native popup before accepting an item. Enter on a collapsed
         // selector can activate the parent dialog's default Close button.
         await page.keyboard.press('Space'); await page.waitForTimeout(200);
-        await page.keyboard.press('Home');
-        for (let step = 0; step < index; step++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(80); }
+        // Home does not move the focused native popup item on every Uno backend.
+        // Navigate from the known selected item rather than assuming it reset to zero.
+        const delta = index - currentIndex;
+        for (let step = 0; step < Math.abs(delta); step++) { await page.keyboard.press(delta < 0 ? 'ArrowUp' : 'ArrowDown'); await page.waitForTimeout(80); }
         await page.keyboard.press('Enter'); await page.waitForTimeout(200);
     }
     async function status(pattern) {
@@ -156,7 +158,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await button('Field Options', true);
         assert.equal(await page.getByRole('textbox', { name: 'Destination field name', exact: true }).count(), 1); checks++;
         await edit('Destination field name', 'ExternalID');
-        await selectIndex('Import data type', 0); // Explicitly preserve IDs as Short Text.
+        await selectIndex('Import data type', 0, 2); // Explicitly preserve IDs as Short Text.
         await edit('Short Text maximum length', '20');
         const generated = peer('checkbox', 'Add AutoNumber primary key'); await focusNative(generated, 'Add AutoNumber primary key'); await page.keyboard.press('Space');
         await edit('Generated key field name', 'RowID');
