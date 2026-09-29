@@ -99,7 +99,17 @@ public sealed class JsonDataSource : IDataSource
         {
             cancellationToken.ThrowIfCancellationRequested(); var row = _rowIndex[index];
             var cells = new string?[_table.Columns.Length];
-            foreach (var property in row.EnumerateObject()) cells[_ordinals[property.Name]] = Text(property.Value);
+            var position = 0;
+            foreach (var property in row.EnumerateObject())
+            {
+                // Uniform object order is common. Compare the UTF-8 property name
+                // without allocating a string; sparse/reordered objects retain the
+                // exact-name dictionary fallback rather than assuming column order.
+                var ordinal = position < _table.Columns.Length && property.NameEquals(_table.Columns[position].Name)
+                    ? position : _ordinals[property.Name];
+                cells[ordinal] = Text(property.Value);
+                position++;
+            }
             result.Add(cells);
         }
         var page = new SourcePage(_table.Columns.ToArray(), result.ToArray(), end < RowCount);

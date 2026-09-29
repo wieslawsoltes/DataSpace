@@ -66,6 +66,15 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.insertText(value); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
         assert.equal(await input.inputValue(), value);
     }
+    async function selectIndex(name, index) {
+        const combo = peer('combobox', name); await focusNative(combo, name);
+        // Open the native popup before accepting an item. Enter on a collapsed
+        // selector can activate the parent dialog's default Close button.
+        await page.keyboard.press('Space'); await page.waitForTimeout(200);
+        await page.keyboard.press('Home');
+        for (let step = 0; step < index; step++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(80); }
+        await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+    }
     async function status(pattern) {
         let snapshot = '';
         for (let attempt = 0; attempt < 120; attempt++) {
@@ -89,7 +98,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await button('JSON File');
         await edit('JSON Pointer', '/data/items');
         const choosingJson = page.waitForEvent('filechooser'); await button('Browse / Connect', true); await (await choosingJson).setFiles(json);
-        await status(/records 1–3/); await edit('Local table name', 'JSON_Import_Test');
+        await status(/records 1–3/); await edit('Local table name', 'JSON_Import_Test'); await page.keyboard.press('Tab');
         await page.screenshot({ path: screenshots + '/json-source-preview.png', fullPage: true });
         await button('Import table', true); const imported = await saveTable('JSON_Import_Test', 3);
         assert.equal(imported.Records[0].Values.title, 'JSON Żółć 😀'); assert.equal(imported.Records[0].Values.empty, ''); assert.equal(imported.Records[0].Values.missing, null); checks++;
@@ -99,11 +108,11 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         const choosingSqlite = page.waitForEvent('filechooser'); await button('Browse / Connect', true); await (await choosingSqlite).setFiles(sqlite);
         // Alphabetical SQLite table order begins with exact_values. Choose items through the native combo.
         await status(/records 1–1/);
-        const tables = peer('combobox', 'Tables'); await focusNative(tables, 'Tables'); await page.keyboard.press('Home'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+        await selectIndex('Tables', 1);
         await status(/records 1–200/); checks++;
         await button('Next ▶', true); await status(/records 201–400/);
-        await button('◀ Previous', true); await status(/cache hits/); checks++;
-        await edit('Local table name', 'SQLite_Import_Test'); await page.screenshot({ path: screenshots + '/sqlite-source-preview.png', fullPage: true });
+        await button('◀ Previous', true); await status(/3 page reads \/ 1 cache hits/); checks++;
+        await edit('Local table name', 'SQLite_Import_Test'); await page.keyboard.press('Tab'); await page.screenshot({ path: screenshots + '/sqlite-source-preview.png', fullPage: true });
         await button('Import table', true); const sqlTable = await saveTable('SQLite_Import_Test', 403);
         assert.equal(sqlTable.Records[0].Values.amount, '12345678901234567890.123456789'); assert.equal(sqlTable.Records[0].Values.bytes, 'hex:0001FF'); checks++;
         await button('External Data'); const download = page.waitForEvent('download');
@@ -123,13 +132,12 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         const token = peer('textbox', 'Gateway access token'); await focusNative(token, 'Gateway access token');
         await page.keyboard.insertText('DataSpace_browser_test_token_only_46'); await page.keyboard.press('Tab');
         await button('Browse / Connect', true); await status(/CI_SQLite.*records 1–200/); checks++;
-        await edit('Local table name', 'Gateway_Import_Test');
+        await edit('Local table name', 'Gateway_Import_Test'); await page.keyboard.press('Tab');
         await page.screenshot({ path: screenshots + '/online-source-preview.png', fullPage: true });
         await button('Import table', true); const remoteTable = await saveTable('Gateway_Import_Test', 403);
         assert.equal(remoteTable.Records[0].Values.title, 'External row 1 Żółć 😀'); checks++;
         await button('External Data'); await button('New Data Source');
-        const provider = peer('combobox', 'Source type'); await focusNative(provider, 'Source type');
-        await page.keyboard.press('Home'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+        await selectIndex('Source type', 2);
         await edit('Endpoint URL', new URL('source-fixture.json', baseURL).href); await edit('JSON Pointer', '/data/items');
         await button('Browse / Connect', true); await status(/records 1–3/); checks++;
         await edit('Local table name', 'JSON_URL_Import_Test'); await button('Import table', true);

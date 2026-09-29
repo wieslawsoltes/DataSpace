@@ -16,7 +16,7 @@ public static class SourceHttp
             throw new DataSpaceException("Use HTTPS, or HTTP on loopback for local development. Credentials must not be embedded in URLs.");
         return uri;
     }
-    public static HttpClient CreateClient() => OperatingSystem.IsBrowser() ? new HttpClient() : new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+    public static HttpClient CreateClient() => OperatingSystem.IsBrowser() ? new HttpClient() : new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
     public static async Task<string> GetAsync(HttpClient client, Uri uri, string? token, int maximumBytes, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);

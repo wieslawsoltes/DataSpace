@@ -32,6 +32,22 @@ public sealed class JsonPagingTests
         }
     }
     [Fact]
+    public async Task OrderedFastPathFallsBackForMissingAndReorderedFields()
+    {
+        await using var source = new JsonDataSource("""
+            [{"A":"a1","B":"b1","C":"c1"},
+             {"C":"c2","A":"a2","B":"b2"},
+             {"A":"a3","C":"c3"},
+             {"B":null,"C":""}]
+            """);
+        var page = await source.ReadAsync(new("data", 0, 10));
+        Assert.Equal(new[] { "A", "B", "C" }, page.Columns.Select(c => c.Name));
+        Assert.Equal(new string?[] { "a1", "b1", "c1" }, page.Rows[0]);
+        Assert.Equal(new string?[] { "a2", "b2", "c2" }, page.Rows[1]);
+        Assert.Equal(new string?[] { "a3", null, "c3" }, page.Rows[2]);
+        Assert.Equal(new string?[] { null, null, "" }, page.Rows[3]);
+    }
+    [Fact]
     public async Task CachedPageDoesNotDecodeAgainAndRefreshDoes()
     {
         await using var source = new JsonDataSource("[{\"x\":1},{\"x\":2}]"); var pager = new SourcePager(source);
