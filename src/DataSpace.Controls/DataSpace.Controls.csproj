@@ -10,6 +10,7 @@
     <Description>Reusable Office-style Uno ribbon, navigation, datasheet and database designer controls.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../DataSpace.DataSources/DataSpace.DataSources.csproj" />
     <ProjectReference Include="../DataSpace.Core/DataSpace.Core.csproj" />
     <ProjectReference Include="../DataSpace.Query/DataSpace.Query.csproj" />
     <ProjectReference Include="../DataSpace.Storage/DataSpace.Storage.csproj" />

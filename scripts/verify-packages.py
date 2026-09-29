@@ -27,19 +27,18 @@ count = 0
 for group in tree.getroot().findall('ItemGroup'):
     for reference in list(group.findall('ProjectReference')):
         group.remove(reference)
-        ET.SubElement(group, 'PackageReference', {'Include': 'DataSpace.Controls', 'Version': '[' + version + ']'})
+        ET.SubElement(group, 'PackageReference', {'Include': Path(reference.attrib['Include']).stem, 'Version': '[' + version + ']'})
         count += 1
-if count != 1 or tree.getroot().findall('.//ProjectReference'):
-    raise SystemExit('Expected exactly one app-to-controls reference; refusing an ambiguous consumer test.')
+if count != 2 or tree.getroot().findall('.//ProjectReference'):
+    raise SystemExit('Expected app references to Controls and desktop Relational; refusing an ambiguous consumer test.')
 tree.write(project, encoding='utf-8', xml_declaration=False)
-# Uno's Debug dependency graph includes DevServer; restore the same configuration
-# that is compiled below instead of reusing Debug assets in an optimized build.
+# Restore the same configuration that is compiled, preserving conditional package references.
 subprocess.run(['dotnet', 'restore', str(project), '-p:Configuration=Release', '--source', str(packages), '--source', 'https://api.nuget.org/v3/index.json'], cwd=root, check=True)
 for framework in ('net10.0-desktop', 'net10.0-browserwasm'):
     subprocess.run(['dotnet', 'build', str(project), '-c', 'Release', '-f', framework, '--no-restore'], cwd=root, check=True)
 libraries = json.loads((target / 'obj' / 'project.assets.json').read_text())['libraries']
-required = {'DataSpace.Core', 'DataSpace.Query', 'DataSpace.Storage', 'DataSpace.Rendering', 'DataSpace.Controls'}
+required = {'DataSpace.Core', 'DataSpace.Query', 'DataSpace.Storage', 'DataSpace.Rendering', 'DataSpace.Controls', 'DataSpace.DataSources', 'DataSpace.DataSources.Relational'}
 actual = {name.split('/')[0] for name, value in libraries.items() if value.get('type') == 'package' and name.endswith('/' + version)}
 if not required.issubset(actual):
-    raise SystemExit('Consumer did not resolve all five DataSpace libraries at the generated package version.')
-print(f'PASS: both Uno heads compiled using all five DataSpace {version} NuGet packages; no library ProjectReference remained.')
+    raise SystemExit('Consumer did not resolve all seven DataSpace libraries at the generated package version.')
+print(f'PASS: both Uno heads compiled using all seven DataSpace {version} NuGet packages; no library ProjectReference remained.')

@@ -111,17 +111,17 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Install WebAssembly toolchain
         run: dotnet workload install wasm-tools --skip-manifest-update
-      - name: Package the five reusable libraries
+      - name: Package the seven reusable libraries
         shell: bash
         run: |
           set -euo pipefail
           for project in src/*/*.csproj; do
-            case "$project" in *.App.csproj) continue;; esac
+            case "$project" in *.App.csproj|*.Gateway.csproj) continue;; esac
             dotnet pack "$project" -c Release \
               -p:Version="$RELEASE_VERSION" -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg \
               -o artifacts/release
           done
-          test "$(find artifacts/release -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
+          test "$(find artifacts/release -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 7
       - uses: actions/download-artifact@v4
         with:
           name: browser-app

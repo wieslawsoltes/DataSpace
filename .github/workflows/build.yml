@@ -69,12 +69,15 @@ jobs:
         run: |
           set -euo pipefail
           dotnet publish src/DataSpace.App/DataSpace.App.csproj -c Release -f net10.0-browserwasm -o artifacts/publish -p:WasmShellWebAppBasePath=./ 2>&1 | tee artifacts/logs/browser-publish.log
-      - name: Stage static site
-        id: stage
-        run: python3 scripts/stage-site.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install pinned SQLite browser assets
+        working-directory: scripts
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Stage static site
+        id: stage
+        run: python3 scripts/stage-site.py
       - name: Test native dialog keyboard helper
         shell: bash
         run: |
@@ -91,13 +94,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          dotnet build src/DataSpace.Gateway/DataSpace.Gateway.csproj -c Release
+          python3 scripts/create-source-fixtures.py
           mkdir -p artifacts/server/DataSpace
           cp -a artifacts/site/. artifacts/server/DataSpace/
           printf '<!doctype html><title>DataSpace storage test</title>' > artifacts/server/DataSpace/storage-test.html
           python3 -m http.server 4173 --bind 127.0.0.1 --directory artifacts/server > artifacts/server.log 2>&1 &
           server_pid=$!
-          trap 'kill "$server_pid"' EXIT
+          GatewayToken=DataSpace_browser_test_token_only_46 \
+          AllowedOrigins__0=http://127.0.0.1:4173 \
+          SourceConnections__0__Id=demo SourceConnections__0__Name=CI_SQLite SourceConnections__0__Provider=sqlite \
+          SourceConnections__0__ConnectionString="Data Source=$GITHUB_WORKSPACE/artifacts/external/items.sqlite" \
+          SourceConnections__0__Tables__0__Id=items SourceConnections__0__Tables__0__Name=items SourceConnections__0__Tables__0__Schema= \
+          SourceConnections__0__Tables__0__OrderColumns__0=id \
+          dotnet src/DataSpace.Gateway/bin/Release/net10.0/DataSpace.Gateway.dll --urls http://127.0.0.1:5099 > artifacts/logs/gateway.log 2>&1 &
+          gateway_pid=$!
+          trap 'kill "$server_pid" "$gateway_pid"' EXIT
           for retry in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/DataSpace/storage-test.html > /dev/null && break || sleep 1; done
+          for retry in $(seq 1 30); do curl -fsS -H 'Authorization: Bearer DataSpace_browser_test_token_only_46' http://127.0.0.1:5099/v1/sources > /dev/null && break || sleep 1; done
           node scripts/browser-smoke.mjs 2>&1 | tee artifacts/logs/browser-tests.log
           mkdir -p artifacts/site/qa
           cp artifacts/qa/*.png artifacts/site/qa/
@@ -107,10 +121,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for project in Core Query Storage Rendering Controls; do
+          for project in Core Query Storage Rendering DataSources DataSources.Relational Controls; do
             dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release -v:normal -o artifacts/packages 2>&1 | tee "artifacts/logs/pack-$project.log"
           done
-          test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 5
+          test "$(find artifacts/packages -maxdepth 1 -name '*.nupkg' | wc -l)" -eq 7
       - name: Compile package-only sample consumer on both Uno heads
         if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
         shell: bash

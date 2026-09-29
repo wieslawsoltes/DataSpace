@@ -37,6 +37,12 @@ public sealed partial class DatabaseWorkspaceView
             case "newReport": CreateObject(DatabaseObjectKind.Report); break;
             case "newMacro": CreateObject(DatabaseObjectKind.Macro); break;
             case "relationships": OpenObject(new(DatabaseObjectKind.Relationships, "Relationships"), true); break;
+            case "externalSources": await ExternalDataAsync("JSON file"); break;
+            case "importJson": await ExternalDataAsync("JSON file"); break;
+            case "importSqlite": await ExternalDataAsync("SQLite file"); break;
+            case "onlineDatabase": await ExternalDataAsync("PostgreSQL"); break;
+            case "exportJson": await ExportSourceAsync(false); break;
+            case "exportSqlite": await ExportSourceAsync(true); break;
             case "importCsv": await ImportCsvAsync(); break;
             case "exportCsv": await ExportCsvAsync(); break;
             case "exportDatabase": await ExportAsync(Workspace.Document.Name + ".dspace", "application/json", Encoding.UTF8.GetBytes(DocumentCodec.Serialize(Workspace.Document))); break;

@@ -21,8 +21,8 @@ public static class OfficeCommandCatalog
             new("Reports", [C("newReport", "Report", "report", true)]),
             new("Macros", [C("newMacro", "Macro", "macro", true)])]),
         new("external", "External Data", [
-            new("Import & Link", [C("open", "Open Database", "open", true), C("importCsv", "Text File", "table", true)]),
-            new("Export", [C("exportCsv", "Text File", "table", true), C("exportDatabase", "DataSpace File", "save", true), C("exportPdf", "PDF Report", "report", true)])]),
+            new("Import & Link", [C("externalSources", "New Data Source", "open", true), C("importJson", "JSON File", "table"), C("importSqlite", "SQLite", "table"), C("onlineDatabase", "Online Database", "relationships"), C("importCsv", "Text File", "table"), C("open", "DataSpace File", "open")]),
+            new("Export", [C("exportCsv", "Text File", "table", true), C("exportJson", "JSON", "table"), C("exportSqlite", "SQLite", "table"), C("exportDatabase", "DataSpace File", "save", true), C("exportPdf", "PDF Report", "report", true)])]),
         new("tools", "Database Tools", [
             new("Relationships", [C("relationships", "Relationships", "relationships", true)]),
             new("Database", [C("validate", "Validate Database", "check", true), C("save", "Save Database", "save", true)]),

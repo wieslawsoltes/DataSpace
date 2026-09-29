@@ -7,7 +7,7 @@
     <ApplicationTitle>DataSpace</ApplicationTitle>
     <ApplicationId>org.dataspace.app</ApplicationId>
     <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
-    <ApplicationVersion>4</ApplicationVersion>
+    <ApplicationVersion>5</ApplicationVersion>
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <WasmShellWebAppBasePath>./</WasmShellWebAppBasePath>
@@ -18,5 +18,8 @@
   <ItemGroup>
     <ProjectReference Include="../DataSpace.Controls/DataSpace.Controls.csproj" />
     <Content Include="browser-storage.js" UnoDeploy="Root" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-desktop'">
+    <ProjectReference Include="../DataSpace.DataSources.Relational/DataSpace.DataSources.Relational.csproj" />
   </ItemGroup>
 </Project>

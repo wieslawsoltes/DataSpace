@@ -37,7 +37,9 @@ public sealed partial class App : Application
                     PlatformServices.SetDirty(_session.IsDirty);
                 },
                 ImportTextAsync = PlatformServices.ImportTextAsync,
-                ExportFileAsync = PlatformServices.ExportFileAsync
+                ExportFileAsync = PlatformServices.ExportFileAsync,
+                OpenSqliteAsync = PlatformServices.OpenSqliteAsync,
+                ExportSqliteTableAsync = PlatformServices.ExportSqliteAsync
             };
             workspace.Changed += (_, _) => PlatformServices.SetDirty(_session.IsDirty);
             _view.Loaded += (_, _) => PlatformServices.Ready(workspace.Document.Name, _session.IsInitialized);
