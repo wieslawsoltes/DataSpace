@@ -1,3 +1,4 @@
+import { externalBrowserChecks } from './external-browser-checks.mjs';
 import { subqueryBrowserChecks } from './subquery-browser-checks.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -80,8 +81,6 @@ try {
         await page.screenshot({ path: screenshots + '/workspace.png', fullPage: true });
         await writeFile(screenshots + '/accessibility.txt', await page.locator('body').ariaSnapshot());
 
-        // Fixed viewport and the shipped Northwind fixture: first row, Company column.
-        // Real pointer/keyboard input catches a collapsed/blank document host that a startup marker cannot.
         await page.mouse.dblclick(420, 248);
         const input = await cellInput('Northwind Traders');
         const editedValue = 'DataSpace browser regression';
@@ -101,11 +100,13 @@ try {
         checks += await queryBrowserChecks(page, baseURL, screenshots, ready);
         checks += await crosstabBrowserChecks(page, baseURL, screenshots, ready);
         checks += await subqueryBrowserChecks(page, baseURL, screenshots, ready);
+        checks += await externalBrowserChecks(page, baseURL, screenshots, ready);
         assert.deepEqual(failures, [], 'No unhandled browser exceptions or missing runtime assets.'); checks++;
-        console.log(`PASS: ${checks} browser checks (IndexedDB races, corruption, Unicode, Uno startup, cell edit/save/reload and visual query workflows).`);
+        console.log(`PASS: ${checks} browser checks (IndexedDB races, corruption, Unicode, Uno startup, cell edit/save/reload and external database workflows).`);
     } finally {
         await page.screenshot({ path: screenshots + '/last-state.png', fullPage: true }).catch(() => {});
         await writeFile(screenshots + '/browser-errors.json', JSON.stringify(failures, null, 2));
-        console.log('UI input diagnostics:', await page.locator('input,textarea').evaluateAll(elements => elements.map(element => ({ value: element.value, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }))));
+        // Never put session-only gateway tokens or password input values in diagnostics.
+        console.log('UI input diagnostics:', await page.locator('input,textarea').evaluateAll(elements => elements.map(element => ({ value: element.type === 'password' ? '[redacted]' : element.value, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }))));
     }
 } finally { await context.close(); await browser.close(); }

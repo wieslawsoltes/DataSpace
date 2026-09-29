@@ -14,6 +14,16 @@ if output.exists():
     shutil.rmtree(output)
 shutil.copytree(source, output)
 shutil.copy2('src/DataSpace.App/browser-storage.js', output / 'browser-storage.js')
+for name in ('browser-sqlite.js', 'sqlite-worker.js'):
+    shutil.copy2(Path('src/DataSpace.App') / name, output / name)
+package = Path('scripts/node_modules/sql.js')
+if not (package / 'dist/sql-wasm.wasm').is_file():
+    raise SystemExit('Run npm install in scripts before staging SQLite assets.')
+vendor = output / 'vendor/sqlite'
+vendor.mkdir(parents=True, exist_ok=True)
+for name in ('sql-wasm.js', 'sql-wasm.wasm'):
+    shutil.copy2(package / 'dist' / name, vendor / name)
+shutil.copy2(package / 'LICENSE', vendor / 'LICENSE')
 (output / '.nojekyll').touch()
 if not any(output.rglob('*.wasm')):
     raise SystemExit('Refusing to publish a site with no .wasm runtime.')

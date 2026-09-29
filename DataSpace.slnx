@@ -5,9 +5,13 @@
     <Project Path="src/DataSpace.Storage/DataSpace.Storage.csproj" />
     <Project Path="src/DataSpace.Rendering/DataSpace.Rendering.csproj" />
     <Project Path="src/DataSpace.Controls/DataSpace.Controls.csproj" />
+    <Project Path="src/DataSpace.DataSources/DataSpace.DataSources.csproj" />
+    <Project Path="src/DataSpace.DataSources.Relational/DataSpace.DataSources.Relational.csproj" />
+    <Project Path="src/DataSpace.Gateway/DataSpace.Gateway.csproj" />
     <Project Path="src/DataSpace.App/DataSpace.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DataSpace.DataSources.Tests/DataSpace.DataSources.Tests.csproj" />
     <Project Path="tests/DataSpace.Tests/DataSpace.Tests.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">

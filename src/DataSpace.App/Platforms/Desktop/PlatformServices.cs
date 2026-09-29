@@ -5,7 +5,7 @@ using Windows.Storage.Pickers;
 
 namespace DataSpace.App;
 
-internal static class PlatformServices
+internal static partial class PlatformServices
 {
     public static Task InitializeAsync() => Task.CompletedTask;
     public static IWorkspaceStore CreateStore() => new FileWorkspaceStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DataSpace", "workspace.dspace"));
@@ -13,6 +13,7 @@ internal static class PlatformServices
     {
         var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
         if (kind == "csv") picker.FileTypeFilter.Add(".csv");
+        else if (kind == "json") picker.FileTypeFilter.Add(".json");
         else { picker.FileTypeFilter.Add(".dspace"); picker.FileTypeFilter.Add(".json"); }
         var file = await picker.PickSingleFileAsync(); if (file is null) return null;
         var properties = await file.GetBasicPropertiesAsync();
