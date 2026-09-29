@@ -137,7 +137,8 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
   deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Release dry runs call this workflow from main; only this workflow's own runs deploy Pages.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.workflow == 'Build, test and deploy'
     needs: [engine, application]
     runs-on: ubuntu-latest
     permissions:

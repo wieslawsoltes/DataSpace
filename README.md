@@ -52,6 +52,20 @@ python3 -m http.server 8080 --directory artifacts/site
 
 Open `http://localhost:8080/`, not `file://`. Desktop execution requires the selected Uno backend's native dependencies and display server. The browser build uses a relative base path and does not require cross-origin-isolation headers or WebAssembly threads.
 
+## Download
+
+Every [release](https://github.com/wieslawsoltes/DataSpace/releases) ships a self-contained, single-file desktop app — no .NET install needed:
+
+| OS | x64 | Arm64 |
+| --- | --- | --- |
+| Windows | `DataSpace-<version>-win-x64.zip` | `DataSpace-<version>-win-arm64.zip` |
+| macOS | `DataSpace-<version>-osx-x64.tar.gz` | `DataSpace-<version>-osx-arm64.tar.gz` |
+| Linux | `DataSpace-<version>-linux-x64.tar.gz` | `DataSpace-<version>-linux-arm64.tar.gz` |
+
+Extract and run `DataSpace` (`DataSpace.exe` on Windows). Builds are not code-signed yet: on macOS clear the quarantine flag with `xattr -d com.apple.quarantine DataSpace`; on Windows choose **More info → Run anyway** in SmartScreen. Verify downloads against `SHA256SUMS.txt`.
+
+The libraries below are published to [NuGet.org](https://www.nuget.org/packages?q=DataSpace), e.g. `dotnet add package DataSpace.Query --prerelease` (preview versions need `--prerelease`).
+
 ## Independently reusable libraries
 
 | Package | Responsibility |
@@ -62,7 +76,7 @@ Open `http://localhost:8080/`, not `file://`. Desktop execution requires the sel
 | `DataSpace.Rendering` | Independent Skia datasheet, form, relationship, report and icon renderers. |
 | `DataSpace.Controls` | Reusable Uno ribbon/navigation/datasheet, object designers, query builders, resource styles and optional full workspace shell. |
 
-None depends on `DataSpace.App`. The thin app injects platform file dialogs and browser interop. CI packages all five libraries; the tag workflow attaches packages to GitHub Releases without publishing to NuGet.org. The controls library uses a portable `net10.0` package asset and is compiled through both app heads.
+None depends on `DataSpace.App`. The thin app injects platform file dialogs and browser interop. CI packages all five libraries; version tags attach them to GitHub Releases and publish them, with symbols, to NuGet.org. The controls library uses a portable `net10.0` package asset and is compiled through both app heads.
 
 ### Engine usage without Uno
 
@@ -113,7 +127,7 @@ dotnet run --project benchmarks/DataSpace.Benchmarks/DataSpace.Benchmarks.csproj
 
 `build.yml` runs managed regressions and benchmarks, compiles desktop, publishes WebAssembly, exercises real IndexedDB and browser interactions, packages the libraries and deploys verified `main` builds. PRs never deploy. Exact source, TRX, performance JSON, packages, screenshots and diagnostics are retained as artifacts. See [CONTRIBUTING.md](CONTRIBUTING.md) for browser-test commands.
 
-`release.yml` verifies version tags and attaches package, browser and source archives with checksums to GitHub Releases. Creating a workflow does not imply that a release has been published; check the release history and CI results.
+`release.yml` reruns the full `build.yml` verification, publishes self-contained single-file desktop executables for Windows, macOS and Linux (x64 and arm64), and packs the libraries with symbols. Version tags attach desktop, package, browser and source archives with `SHA256SUMS.txt` to a GitHub Release (prerelease for versions with a suffix) and publish the packages to NuGet.org with [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC, no stored API key) from the protected `nuget` environment. Manual runs take a `version` input and are dry runs: they build and upload every asset as workflow artifacts but publish nothing and do not deploy Pages. Creating a workflow does not imply that a release has been published; check the release history and CI results.
 
 ## Save and protect work
 

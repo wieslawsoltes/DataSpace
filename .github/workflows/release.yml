@@ -2,47 +2,122 @@ name: Release packages and application
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version for a dry run (tags publish; manual runs only build and upload artifacts)
+        required: true
+        default: '0.2.0-preview.3'
 permissions:
   contents: read
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
+env:
+  APP_NAME: DataSpace
+  APP_PROJECT: src/DataSpace.App/DataSpace.App.csproj
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Validate release tag or dry-run version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="v$INPUT_VERSION"
+          if [ "$REF_TYPE" = tag ]; then RELEASE_TAG="$REF_NAME"; fi
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] || { echo 'Use vMAJOR.MINOR.PATCH[-prerelease]'; exit 1; }
+          echo "value=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
   verify:
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
       pages: write
       id-token: write
-  package:
-    needs: verify
+  desktop:
+    name: Desktop (${{ matrix.rid }})
+    needs: version
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64]
+    env:
+      VERSION: ${{ needs.version.outputs.value }}
+      RID: ${{ matrix.rid }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - name: Validate release tag
-        id: version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Publish self-contained single-file executable
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] || { echo 'Use vMAJOR.MINOR.PATCH[-prerelease]'; exit 1; }
-          echo "value=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          dotnet publish "$APP_PROJECT" -c Release -f net10.0-desktop -r "$RID" --self-contained true \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:IncludeAllContentForSelfExtract=true -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none -p:DebugSymbols=false -p:Version="$VERSION" \
+            -o "artifacts/desktop/$RID"
+      - name: Package executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="artifacts/desktop/$RID"
+          find "$OUT" -name '*.pdb' -delete
+          mkdir -p artifacts/dist
+          BASE="$APP_NAME-$VERSION-$RID"
+          if [[ "$RID" == win-* ]]; then
+            mv "$OUT/$APP_NAME.App.exe" "$OUT/$APP_NAME.exe"
+            test "$(find "$OUT" -type f | wc -l)" -eq 1
+            (cd "$OUT" && zip -q "$GITHUB_WORKSPACE/artifacts/dist/$BASE.zip" "$APP_NAME.exe")
+          else
+            mv "$OUT/$APP_NAME.App" "$OUT/$APP_NAME"
+            chmod +x "$OUT/$APP_NAME"
+            test "$(find "$OUT" -type f | wc -l)" -eq 1
+            tar -C "$OUT" -czf "artifacts/dist/$BASE.tar.gz" "$APP_NAME"
+          fi
+          ls -la artifacts/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.rid }}
+          path: artifacts/dist/*
+          if-no-files-found: error
+  package:
+    needs: [version, verify, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
       - name: Install WebAssembly toolchain
         run: dotnet workload install wasm-tools --skip-manifest-update
       - name: Package the five reusable libraries
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         shell: bash
         run: |
           set -euo pipefail
-          for project in Core Query Storage Rendering Controls; do
-            dotnet pack "src/DataSpace.$project/DataSpace.$project.csproj" -c Release \
+          for project in src/*/*.csproj; do
+            case "$project" in *.App.csproj) continue;; esac
+            dotnet pack "$project" -c Release \
               -p:Version="$RELEASE_VERSION" -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg \
               -o artifacts/release
           done
@@ -51,16 +126,33 @@ jobs:
         with:
           name: browser-app
           path: artifacts/browser
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: artifacts/release
+          merge-multiple: true
       - name: Archive verified browser distribution and source
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         shell: bash
         run: |
           set -euo pipefail
           (cd artifacts/browser && zip -qr "../release/DataSpace-browser-$RELEASE_VERSION.zip" .)
           git archive --format=zip --prefix=DataSpace/ HEAD > "artifacts/release/DataSpace-source-$RELEASE_VERSION.zip"
-          (cd artifacts/release && sha256sum *.nupkg *.snupkg *.zip > SHA256SUMS.txt)
+          (cd artifacts/release && sha256sum *.nupkg *.snupkg *.zip *.tar.gz > SHA256SUMS.txt)
+          cat artifacts/release/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dataspace-release
+          path: artifacts/release/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: |
+            artifacts/release/*.nupkg
+            artifacts/release/*.snupkg
+          if-no-files-found: error
       - name: Publish GitHub Release assets
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
@@ -69,5 +161,40 @@ jobs:
           set -euo pipefail
           flags=()
           [[ "$RELEASE_TAG" != *-* ]] || flags+=(--prerelease)
-          gh release create "$RELEASE_TAG" artifacts/release/* --verify-tag \
-            --title "DataSpace $RELEASE_TAG" --generate-notes "${flags[@]}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" artifacts/release/* --clobber
+          else
+            gh release create "$RELEASE_TAG" artifacts/release/* --verify-tag \
+              --title "DataSpace $RELEASE_TAG" --generate-notes "${flags[@]}"
+          fi
+  nuget:
+    name: Publish to NuGet.org (Trusted Publishing)
+    needs: [version, package]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: nuget
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: packages
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Check NuGet user
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+        run: test -n "$NUGET_USER" || { echo 'Set the NUGET_USER variable (your nuget.org profile name) for this repository or its nuget environment.' >&2; exit 1; }
+      - name: NuGet login (OIDC → short-lived API key)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+      - name: Push packages
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "packages/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

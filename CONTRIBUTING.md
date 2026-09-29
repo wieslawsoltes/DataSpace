@@ -28,6 +28,6 @@ Tests use isolated browser contexts and a separately named IndexedDB database. D
 
 ## Packages and releases
 
-The release workflow accepts pushed version tags such as `v0.1.0` and `v0.2.0-preview.1`. It runs verification before publishing artifacts. Tags are maintainer actions; do not create release tags for an unreviewed or failing branch. Packages stay in GitHub Releases unless a separate NuGet publishing process is explicitly configured.
+The release workflow accepts pushed version tags such as `v0.1.0` and `v0.2.0-preview.1`. It runs verification before publishing artifacts. Tags are maintainer actions; do not create release tags for an unreviewed or failing branch. Tag builds attach self-contained desktop executables and packages to the GitHub Release, then publish the packages to NuGet.org through Trusted Publishing from the protected `nuget` environment (only the `NUGET_USER` variable is needed; no API key is stored). A manual `workflow_dispatch` run with a `version` input is a dry run that publishes nothing.
 
 When changing Uno or SkiaSharp, align managed and native packages and retest both targets. The documented native build compatibility target is version-specific; do not keep accumulating broad overrides after upgrading dependencies.
