@@ -11,7 +11,7 @@
 
 DataSpace brings an Office-style ribbon, searchable object navigation, tabbed objects, editable datasheets, graphical queries, form design, report previews and relationship diagrams to a shared .NET codebase. The browser is the actual Uno/Skia application compiled to WebAssembly—not an HTML mockup or a separate front end.
 
-> **0.2.0-preview.3:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
+> **0.2.0-preview.4:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
 
 ## Workspace
 
@@ -25,13 +25,21 @@ DataSpace brings an Office-style ribbon, searchable object navigation, tabbed ob
 | Forms | Bound record entry, text/YesNo controls, navigation, snapped control drag/resize, creation/deletion and geometry/caption properties. |
 | Reports | Table/query source, columns, title/orientation, pagination, zoom and Skia PDF export through the same page renderer. |
 | Relationships and macros | Referential checks/cascades, draggable relationship diagrams, and explicitly invoked ordered workspace macro actions. |
-| Files | Versioned `.dspace` JSON, CSV import/export, desktop file adapters, transactional IndexedDB, cross-tab version checks and explicit backup exports. |
+| Files and external data | Versioned `.dspace`, CSV/JSON/SQLite import/export, JSON URL/Pointer sources, paged read-only online sources through an authenticated gateway, transactional IndexedDB and explicit backups. |
 
 The Northwind-style initial workspace contains demonstration data. Use **File → New** to create a database or **External Data → Text File** to import CSV. In a query, switch between **Design View**, **SQL View** and **Datasheet View**. Compound/action SQL stays in SQL View when it cannot be represented by the SELECT designer. In table Design View, **Indexes** opens the reusable ordered index editor.
 
 Crosstab queries have a dedicated **Crosstab Builder**, optional fixed column headings and row totals. The engine also supports atomic `SELECT INTO` make-table queries and constraint-index DDL. Streaming groups and bounded ordered `TOP` selection reduce retained query state. See [query analytics](docs/QUERY-ANALYTICS.md) for syntax, reusable APIs and explicit limitations.
 
-**Find Duplicates** and **Find Unmatched** in the query editor generate ordinary saved SQL. Nested queries support lexical correlations and per-execution caching of eligible independent results, with explicit work limits and null semantics. See [subqueries and Find builders](docs/SUBQUERIES.md). Duplicate detail searches remain correlated and may be expensive; summary mode is preferable for large tables.
+**Find Duplicates** and **Find Unmatched** in the query editor generate ordinary saved SQL. Nested queries support lexical correlations and per-execution caching of eligible independent results, with explicit work limits and null semantics. See [subqueries and Find builders](docs/SUBQUERIES.md). Single-key duplicate details use a grouped key set; composite-key details retain a bounded correlated path.
+
+## External data: SQLite, JSON and online databases
+
+**External Data → New Data Source** opens an Access-style source sidebar and read-only preview. Browse JSON or SQLite files, select a nested JSON array with JSON Pointer, connect to a JSON URL, or use the **Online Database** command for PostgreSQL, MySQL/MariaDB and SQL Server via the self-hosted DataSpace gateway. Page navigation, refresh and a bounded cache avoid importing a whole database merely to inspect it. **Import table** creates a validated, editable local copy; it does not link or write through to the source.
+
+SQLite file operations run in a dedicated, disposable WASM worker in the browser and through `Microsoft.Data.Sqlite` on desktop. The browser assets are pinned and served locally; no third-party CDN is required. Exports create standalone SQLite databases using TEXT/null columns so large integers, precise decimals and source values do not round through JavaScript numbers. Relational preview values are text; JSON signed 64-bit integers and booleans remain typed, while arbitrary-precision numbers and nested objects/arrays are preserved as text.
+
+Online database credentials and allowlisted table definitions are configured on the gateway, **never in the static Pages app**. The UI holds only a session access token. Deploy the gateway separately with HTTPS and least-privilege database credentials; it is not a hosted service supplied by the Pages demo. See [setup, APIs and limits](docs/EXTERNAL-DATA.md).
 
 ## Build and run
 
@@ -48,6 +56,7 @@ dotnet run --project src/DataSpace.App/DataSpace.App.csproj -f net10.0-desktop
 # Publish the real browser application
 dotnet publish src/DataSpace.App/DataSpace.App.csproj \
   -c Release -f net10.0-browserwasm -o artifacts/publish
+(cd scripts && npm install --ignore-scripts --no-audit --no-fund)
 python3 scripts/stage-site.py
 python3 -m http.server 8080 --directory artifacts/site
 ```
@@ -56,7 +65,7 @@ Open `http://localhost:8080/`, not `file://`. Desktop execution requires the sel
 
 ## Download
 
-Every [release](https://github.com/wieslawsoltes/DataSpace/releases) ships a self-contained, single-file desktop app — no .NET install needed:
+The version-tag release workflow builds self-contained, single-file desktop apps. Check the [release assets](https://github.com/wieslawsoltes/DataSpace/releases) for published versions:
 
 | OS | x64 | Arm64 |
 | --- | --- | --- |
@@ -64,11 +73,11 @@ Every [release](https://github.com/wieslawsoltes/DataSpace/releases) ships a sel
 | macOS | `DataSpace-<version>-osx-x64.tar.gz` | `DataSpace-<version>-osx-arm64.tar.gz` |
 | Linux | `DataSpace-<version>-linux-x64.tar.gz` | `DataSpace-<version>-linux-arm64.tar.gz` |
 
-Extract and run `DataSpace` (`DataSpace.exe` on Windows). Builds are not code-signed yet: on macOS clear the quarantine flag with `xattr -d com.apple.quarantine DataSpace`; on Windows choose **More info → Run anyway** in SmartScreen. Verify downloads against `SHA256SUMS.txt`.
+Extract and run `DataSpace` (`DataSpace.exe` on Windows). Builds are not code-signed yet. Verify downloads against `SHA256SUMS.txt` and review operating-system warnings; use a reviewed source build when local policy blocks unsigned binaries.
 
 ## NuGet packages
 
-DataSpace ships as five MIT-licensed packages on [NuGet.org](https://www.nuget.org/packages?q=DataSpace), versioned together and published by version tags with symbol packages (`.snupkg`) and SourceLink. All five target `net10.0`. `DataSpace.Core`, `DataSpace.Query` and `DataSpace.Storage` have no UI or graphics dependency, `DataSpace.Rendering` needs only SkiaSharp 4.152, and `DataSpace.Controls` is an Uno Platform (Skia renderer) library that ships one portable `net10.0` asset and is compiled through both the desktop and WebAssembly app heads. None depends on `DataSpace.App`; the thin app only injects platform file dialogs and browser interop. Current versions are previews, so pass `--prerelease`.
+DataSpace has seven MIT-licensed library projects, versioned together. CI produces NuGet packages; release workflows also pack symbol packages (`.snupkg`) and version-tag workflows can publish them to [NuGet.org](https://www.nuget.org/packages?q=DataSpace). The two external-source packages are included beginning with preview.4. All seven target `net10.0`. `DataSpace.Core`, `DataSpace.Query` and `DataSpace.Storage` have no UI or graphics dependency, `DataSpace.Rendering` needs only SkiaSharp 4.152, and `DataSpace.Controls` is an Uno Platform (Skia renderer) library that ships one portable `net10.0` asset and is compiled through both the desktop and WebAssembly app heads. None depends on `DataSpace.App`; the thin app only injects platform file dialogs and browser interop. Current versions are previews, so pass `--prerelease`.
 
 ```sh
 dotnet add package DataSpace.Core --prerelease
@@ -80,9 +89,11 @@ dotnet add package DataSpace.Core --prerelease
 | [DataSpace.Query](https://www.nuget.org/packages/DataSpace.Query) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Query.svg)](https://www.nuget.org/packages/DataSpace.Query) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Query.svg)](https://www.nuget.org/packages/DataSpace.Query) | Managed SQL parser and evaluator, QBE/crosstab/Find designs, subqueries, statistics and lazy table views |
 | [DataSpace.Storage](https://www.nuget.org/packages/DataSpace.Storage) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Storage.svg)](https://www.nuget.org/packages/DataSpace.Storage) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Storage.svg)](https://www.nuget.org/packages/DataSpace.Storage) | CSV interchange, optimistic versioned storage contracts/adapters and save-session coordination |
 | [DataSpace.Rendering](https://www.nuget.org/packages/DataSpace.Rendering) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Rendering.svg)](https://www.nuget.org/packages/DataSpace.Rendering) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Rendering.svg)](https://www.nuget.org/packages/DataSpace.Rendering) | UI-independent SkiaSharp datasheet, relationship, form, report/PDF and icon renderers |
+| `DataSpace.DataSources` | Preview.4 CI artifact | — | UI-independent JSON/HTTP sources, contracts, cache, atomic-copy import and export |
+| `DataSpace.DataSources.Relational` | Preview.4 CI artifact | — | Native SQLite and configured relational paging; not included in the browser runtime |
 | [DataSpace.Controls](https://www.nuget.org/packages/DataSpace.Controls) | [![NuGet](https://img.shields.io/nuget/vpre/DataSpace.Controls.svg)](https://www.nuget.org/packages/DataSpace.Controls) | [![Downloads](https://img.shields.io/nuget/dt/DataSpace.Controls.svg)](https://www.nuget.org/packages/DataSpace.Controls) | Uno ribbon, navigation, datasheet, object designers, query builders, styles and optional full workspace shell |
 
-Dependencies follow the real project references: `Core ← Query`, `Core ← Storage`, `Core ← Rendering`, and `Core + Query + Storage + Rendering ← Controls`.
+Dependencies follow the real project references: `Core ← Query`, `Core ← Storage`, `Core ← Rendering`, `Core ← DataSources ← DataSources.Relational`, and `Core + Query + Storage + Rendering + DataSources ← Controls`.
 
 Only mutate live data through `DatabaseWorkspace.Edit` or `UpdateRecords`. Public models remain mutable for construction/serialization, but direct mutation bypasses history, validation and cache guarantees. Virtual-view records are detached display snapshots, not backing storage. Dispose owned views, renderers and sessions when their host is finished.
 
@@ -237,7 +248,7 @@ File.WriteAllBytes("customer-directory.pdf", reports.ExportPdf(report, source.Fi
 
 ### DataSpace.Controls
 
-Reusable Office-style Uno Platform controls: ribbon, navigation pane, tab strip and record navigator; the virtualized `DatasheetControl`; table, index, query (SQL and QBE), crosstab, Find, form, report, relationship and macro designers; resource styles; and the optional full `DatabaseWorkspaceView` shell. Individual controls and designers do not require the shell. Depends on Core, Query, Storage, Rendering and `SkiaSharp.Views.Uno.WinUI`; requires Uno Platform with the Skia renderer. Merge `ms-appx:///DataSpace.Controls/Themes/OfficeResources.xaml` into your application resources for the supplied styling.
+Reusable Office-style Uno Platform controls: ribbon, navigation pane, tab strip and record navigator; the virtualized `DatasheetControl`; table, index, query (SQL and QBE), crosstab, Find, form, report, relationship and macro designers; resource styles; and the optional full `DatabaseWorkspaceView` shell. Individual controls and designers do not require the shell. Depends on Core, Query, Storage, DataSources, Rendering and `SkiaSharp.Views.Uno.WinUI`; requires Uno Platform with the Skia renderer. Merge `ms-appx:///DataSpace.Controls/Themes/OfficeResources.xaml` into your application resources for the supplied styling.
 
 ```sh
 dotnet add package DataSpace.Controls --prerelease
