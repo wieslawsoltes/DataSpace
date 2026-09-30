@@ -3,7 +3,7 @@ namespace DataSpace.Core;
 public sealed record RecordEdit(string RecordId, string Field, string? Value);
 
 /// <summary>Single-writer transactional document with validated edits and bounded undo/redo.</summary>
-public sealed class DatabaseWorkspace
+public sealed partial class DatabaseWorkspace
 {
     private readonly LinkedList<(DatabaseDocument Document, string Label)> _undo = new();
     private readonly Stack<(DatabaseDocument Document, string Label)> _redo = new();
