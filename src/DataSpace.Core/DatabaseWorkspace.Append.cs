@@ -13,17 +13,22 @@ public sealed partial class DatabaseWorkspace
     {
         ArgumentNullException.ThrowIfNull(columns); ArgumentNullException.ThrowIfNull(rows);
         CheckRevision(expectedRevision); cancellationToken.ThrowIfCancellationRequested();
-        if (columns.Count is < 1 or > 256) throw new DataSpaceException("Map 1–256 destination fields.");
         if (maximumCharacters < 1) throw new ArgumentOutOfRangeException(nameof(maximumCharacters));
-        var source = Document.Table(tableName);
-        var names = columns.ToArray(); // Do not depend on a mutable mapping while enumerating rows.
-        var mapped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var name in names)
-            if (!mapped.Add(source.Field(name).Name)) throw new DataSpaceException("A destination field can be mapped only once.");
-        var ordinals = source.Fields.Select(field => Array.FindIndex(names, name => Names.Equal(name, field.Name))).ToArray();
         var added = 0; long characters = 0; _editing = true;
         try
         {
+            // Protect mapping callbacks as well as row callbacks from nested edits.
+            // Read at most the validated number of columns, without an unbounded enumerator.
+            var count = columns.Count;
+            if (count is < 1 or > 256) throw new DataSpaceException("Map 1–256 destination fields.");
+            var source = Document.Table(tableName);
+            var names = new string[count];
+            for (var index = 0; index < count; index++)
+            { cancellationToken.ThrowIfCancellationRequested(); names[index] = columns[index]; }
+            var mapped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in names)
+                if (!mapped.Add(source.Field(name).Name)) throw new DataSpaceException("A destination field can be mapped only once.");
+            var ordinals = source.Fields.Select(field => Array.FindIndex(names, name => Names.Equal(name, field.Name))).ToArray();
             var draft = DocumentSnapshot.Copy(Document, true); var table = draft.Table(tableName);
             // Existing snapshots are already validated. Only new rows are normalized;
             // read-only constraint checks below never mutate the shared old records.

@@ -73,4 +73,21 @@ public sealed class AppendBoundaryTests
             new[] { new string?[] { "abc" } }, maximumCharacters: 4));
         Assert.Equal("1", workspace.Document.Table("Table1").Records[0]["ID"]);
     }
+    [Fact]
+    public void MappingCallbacksCannotStartNestedTransactions()
+    {
+        var document = new DatabaseDocument(); ObjectFactory.CreateTable(document);
+        var workspace = new DatabaseWorkspace(document); var before = workspace.Document;
+        var columns = new ReentrantColumns(() => workspace.Edit("nested", candidate => candidate.Name = "Changed"));
+        Assert.Throws<DataSpaceException>(() => workspace.AppendRecords("append", "Table1", columns, new[] { new string?[] { "Value" } }));
+        Assert.Same(before, workspace.Document); Assert.False(workspace.CanUndo);
+    }
+
+    private sealed class ReentrantColumns(Action callback) : IReadOnlyList<string>
+    {
+        public int Count => 1;
+        public string this[int index] { get { callback(); return "Title"; } }
+        public IEnumerator<string> GetEnumerator() { yield return this[0]; }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 }
