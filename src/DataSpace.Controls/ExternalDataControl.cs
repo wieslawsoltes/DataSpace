@@ -16,6 +16,11 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
     private readonly ComboBox _tables = new() { HorizontalAlignment = HorizontalAlignment.Stretch, DisplayMemberPath = "Name" };
     private readonly NumberBox _maximum = new() { Value = 10000, Minimum = 1, Maximum = SourceLimits.MaxImportRows, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
     private readonly DatasheetControl _preview = new();
+    private ImportFieldOptionsControl? _fieldOptions;
+    private readonly Grid _viewHost = new();
+    private readonly Dictionary<string, SourceImportPlan> _plans = new(StringComparer.Ordinal);
+    private string? _planTable;
+    private readonly Button _fieldOptionsButton, _dataPreviewButton;
     private readonly ValidationMessageControl _error = new();
     private readonly StatusMessageControl _status = new() { Text = "Choose a source to preview its tables." };
     private readonly TextBlock _hint = OfficeVisuals.Text("", 12, "666666");
@@ -59,8 +64,11 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         EditorVisuals.Labeled(left, "Maximum imported records", _maximum);
         OfficeVisuals.Add(root, OfficeVisuals.Border(new ScrollViewer { Content = left, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, "F5F5F5", thickness: new(0, 0, 1, 0)), 1);
         var right = OfficeVisuals.Grid("Auto,Auto,*,Auto"); right.Margin = new(14, 0, 0, 0);
-        var label = OfficeVisuals.Text("Read-only preview", 15, bold: true); label.Margin = new(0, 0, 0, 8); OfficeVisuals.Add(right, label);
-        OfficeVisuals.Add(right, _error, 1); OfficeVisuals.Add(right, _preview, 2);
+        _dataPreviewButton = OfficeVisuals.Button("Data Preview", () => ShowFieldOptions(false), "table");
+        _fieldOptionsButton = OfficeVisuals.Button("Field Options", () => ShowFieldOptions(true), "design");
+        var viewCommands = OfficeVisuals.Row(_dataPreviewButton, _fieldOptionsButton); viewCommands.Margin = new(0, 0, 0, 8);
+        OfficeVisuals.Add(right, viewCommands);
+        OfficeVisuals.Add(right, _error, 1); _viewHost.Children.Add(_preview); OfficeVisuals.Add(right, _viewHost, 2);
         _previous = OfficeVisuals.Button("◀ Previous", () => Run(ct => PageAsync(Math.Max(0, _offset - 200), ct), _previous), automationId: "SourcePrevious");
         _next = OfficeVisuals.Button("Next ▶", () => Run(ct => PageAsync(_offset + 200, ct), _next), automationId: "SourceNext");
         _refresh = OfficeVisuals.Button("Refresh", () => Run(async ct => { _pager?.Invalidate(); await PageAsync(0, ct); }, _refresh), "refresh", "SourceRefresh");
@@ -165,6 +173,13 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
     {
         if (_pager is null || _tables.SelectedItem is not SourceTable table) return;
         SetStatus("Reading table page…"); var page = await _pager.ReadAsync(new(table.Id, offset, 200), ct); ct.ThrowIfCancellationRequested(); if (_disposed) return;
+        if (!page.Columns.SequenceEqual(table.Columns)) throw new DataSpaceException("Source schema changed. Reconnect before importing.");
+        if (_planTable != table.Id)
+        {
+            if (_fieldOptions is not null && _planTable is not null) _plans[_planTable] = _fieldOptions.CapturePlan();
+            if (!_plans.TryGetValue(table.Id, out var plan)) _plans.Add(table.Id, plan = SourceImportPlan.CreateDefault(table));
+            _fieldOptions?.SetPlan(plan); _planTable = table.Id;
+        }
         _offset = offset; _more = page.HasMore;
         _preview.SetData(SourceImport.Fields(page.Columns), SourceImport.Records(page), true);
         SetStatus($"{_source!.DisplayName} · records {(page.Rows.Length == 0 ? 0 : offset + 1):N0}–{offset + page.Rows.Length:N0} · {_pager.Reads} page reads / {_pager.CacheHits} cache hits");
@@ -172,32 +187,57 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
     private async Task ImportAsync(CancellationToken ct)
     {
         if (_source is null || _tables.SelectedItem is not SourceTable table) return;
+        if (_planTable != table.Id) throw new DataSpaceException("Load the selected table successfully before importing.");
         if (!double.IsFinite(_maximum.Value)) throw new DataSpaceException("Enter a maximum record count.");
         var name = _name.Text; Names.Validate(name);
         if (NameAvailable?.Invoke(name) == false) throw new DataSpaceException("A local table already has that name. Choose another name.");
         SetStatus("Importing complete table into a detached local copy…");
-        var imported = await SourceImport.ReadTableAsync(_source, table, name, (int)_maximum.Value, cancellationToken: ct);
+        var imported = await SourceImport.ReadTableAsync(_source, table, name, _fieldOptions?.CapturePlan() ?? _plans[table.Id], (int)_maximum.Value, cancellationToken: ct);
         ct.ThrowIfCancellationRequested(); if (_disposed) return; ImportedTable = imported; ImportCompleted?.Invoke();
     }
     private async Task ClearSourceAsync()
     {
         var source = _source; _source = null; _pager = null; _offset = 0; _more = false;
+        if (_fieldOptions is not null)
+        {
+            _viewHost.Children.Remove(_fieldOptions); _fieldOptions.Dispose(); _fieldOptions = null;
+        }
+        _plans.Clear(); _planTable = null; ShowFieldOptions(false);
         _changing = true; _tables.Items.Clear(); _changing = false;
         if (!_disposed) _preview.SetData([], [], true);
         if (source is not null) await source.DisposeAsync();
         if (!_disposed) UpdateButtons();
+    }
+    private void ShowFieldOptions(bool show)
+    {
+        if (show)
+        {
+            if (_tables.SelectedItem is not SourceTable selected || selected.Id != _planTable) return;
+            if (_fieldOptions is null)
+            {
+                // Never construct hidden native inputs for preview-only dialogs.
+                // Unloaded/never-shown input peers otherwise outlive their modal on some Uno backends.
+                _fieldOptions = new ImportFieldOptionsControl();
+                _fieldOptions.SetPlan(_plans[selected.Id]); _viewHost.Children.Add(_fieldOptions);
+            }
+        }
+        if (_fieldOptions is not null) _fieldOptions.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        _preview.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
     }
     private void SetStatus(string value) => _status.Text = value;
     private void UpdateButtons()
     {
         _provider.IsEnabled = _connect.IsEnabled = _address.IsEnabled = _token.IsEnabled = _pointer.IsEnabled = !_busy;
         _sourceList.IsEnabled = _tables.IsEnabled = !_busy;
-        _cancel.IsEnabled = _busy; _import.IsEnabled = !_busy && _source is not null && _tables.SelectedItem is SourceTable;
+        if (_fieldOptions is not null) _fieldOptions.IsEnabled = !_busy;
+        var hasCurrentPlan = _tables.SelectedItem is SourceTable selected && selected.Id == _planTable;
+        _fieldOptionsButton.IsEnabled = _dataPreviewButton.IsEnabled = !_busy && hasCurrentPlan;
+        _cancel.IsEnabled = _busy; _import.IsEnabled = !_busy && _source is not null && hasCurrentPlan;
         _previous.IsEnabled = !_busy && _offset > 0; _next.IsEnabled = !_busy && _more; _refresh.IsEnabled = !_busy && _source is not null;
     }
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return; _disposed = true; _operation?.Cancel(); _token.Password = "";
-        await ClearSourceAsync(); _preview.Dispose();
+        await ClearSourceAsync(); _preview.Dispose(); _viewHost.Children.Clear(); Content = null;
     }
 }

@@ -1,6 +1,6 @@
 # Compatibility and remaining work
 
-DataSpace 0.2.0-preview.4 is an independent Access-style application, not a drop-in Microsoft Access replacement. The table distinguishes implemented workflows from remaining compatibility boundaries.
+DataSpace 0.2.0-preview.5 is an independent Access-style application, not a drop-in Microsoft Access replacement. The table distinguishes implemented workflows from remaining compatibility boundaries.
 
 | Area | Implemented | Material remaining work |
 | --- | --- | --- |
@@ -40,3 +40,7 @@ The UI is independently styled and drawn. No Microsoft Access source, proprietar
 JSON files/URLs and JSON Pointer selection, real SQLite files on browser/desktop, and a read-only HTTP gateway for PostgreSQL, MySQL, MariaDB, SQL Server and SQLite are implemented. The gateway uses configured table allowlists, parameterized page limits, an access token, exact CORS origins, concurrency/time/response bounds and redacted errors. This is **not** complete ODBC/OLE DB, persistent linked tables, federated query planning or write-through editing. Imports are local copies; refresh updates the session preview, not an already imported table.
 
 The source layer defaults to conservative text preservation for relational values. SQLite exports use TEXT/null columns and do not preserve original types, indexes, triggers, views, foreign keys or Access objects. SQLite opening is capped at 16 MiB; external imports at 100,000 rows; source tables at 128 columns. Multi-page remote reads are not a cross-request transaction: choose a stable unique ordering key and avoid concurrent source changes when importing. A shared gateway token grants access to all configured sources; this is not per-user authorization. TLS, deployment secrets and least-privilege database permissions are the operator's responsibility. Independent security and production-scale qualification remain open.
+
+### Import field options (preview.5)
+
+Per-column skip/rename/type/length/required/unique settings and existing or generated primary keys now apply to external imports. Plans are session-local, not saved Access specifications or recurring jobs. Imported destination text is capped at 16,777,216 UTF-16 characters across pages. Selected fields avoid destination materialization/validation of skipped values; source adapters still fetch complete pages. Append-to-existing-table, linked-table refresh and write-through remain unimplemented.
