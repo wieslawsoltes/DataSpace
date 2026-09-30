@@ -3,7 +3,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>0.2.0-preview.5</Version>
+    <Version>0.2.0-preview.6</Version>
     <SkiaSharpVersion>4.152.1</SkiaSharpVersion>
     <Authors>Wiesław Šoltés</Authors>
     <Company>Wiesław Šoltés</Company>

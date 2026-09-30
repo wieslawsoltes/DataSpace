@@ -171,6 +171,23 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         assert.deepEqual(mapped.Fields.map(field => field.Name), ['RowID', 'ExternalID', 'title', 'active', 'empty']); checks++;
         assert.equal(mapped.Fields[0].Type, 'AutoNumber'); assert.equal(mapped.Fields[0].PrimaryKey, true); assert.equal(mapped.NextAutoNumber, 4); checks++;
         assert.equal(mapped.Fields[1].Type, 'ShortText'); assert.equal(mapped.Records[2].Values.ExternalID, '3'); assert.equal(mapped.Records[2].Values.RowID, '3'); checks++;
+        // Append the current imported datasheet to itself: omit the AutoNumber key by default.
+        await button('External Data'); await button('Append Records');
+        await page.keyboard.press('Enter'); // The safe default is Cancel, not Append.
+        await peer('combobox', 'Destination table').waitFor({ state: 'detached', timeout: 5000 });
+        assert.equal((await database()).Tables.find(table => table.Name === 'Mapped_Import_Test').Records.length, 3); checks++;
+        await button('Append Records');
+        await page.screenshot({ path: screenshots + '/append-records.png', fullPage: true });
+        await button('Append records', true);
+        const appended = await saveTable('Mapped_Import_Test', 6);
+        assert.deepEqual(appended.Records.map(row => row.Values.RowID), ['1', '2', '3', '4', '5', '6']);
+        assert.equal(appended.NextAutoNumber, 7); assert.equal(appended.Records[5].Values.ExternalID, '3'); checks++;
+        await page.keyboard.press('Control+z'); await saveTable('Mapped_Import_Test', 3); checks++;
+        await page.keyboard.press('Control+y'); await saveTable('Mapped_Import_Test', 6); checks++;
+        await button('External Data'); await button('Append Records');
+        await selectIndex('Append to field', 1); // Explicitly map RowID, which must reject duplicate keys.
+        await button('Append records', true); await status(/Duplicate value in unique index/);
+        await button('Cancel', true); await saveTable('Mapped_Import_Test', 6); checks++;
         await page.reload({ waitUntil: 'domcontentloaded' }); await ready();
         const saved = await database(); assert.equal(saved.Tables.find(t => t.Name === 'SQLite_Import_Test').Records.length, 403); checks++;
         assert.ok(!JSON.stringify(saved).includes('DataSpace_browser_test_token_only_46')); checks++;
