@@ -1,6 +1,6 @@
 # Compatibility and remaining work
 
-DataSpace 0.2.0-preview.5 is an independent Access-style application, not a drop-in Microsoft Access replacement. The table distinguishes implemented workflows from remaining compatibility boundaries.
+DataSpace 0.2.0-preview.6 is an independent Access-style application, not a drop-in Microsoft Access replacement. The table distinguishes implemented workflows from remaining compatibility boundaries.
 
 | Area | Implemented | Material remaining work |
 | --- | --- | --- |
@@ -43,4 +43,8 @@ The source layer defaults to conservative text preservation for relational value
 
 ### Import field options (preview.5)
 
-Per-column skip/rename/type/length/required/unique settings and existing or generated primary keys now apply to external imports. Plans are session-local, not saved Access specifications or recurring jobs. Imported destination text is capped at 16,777,216 UTF-16 characters across pages. Selected fields avoid destination materialization/validation of skipped values; source adapters still fetch complete pages. Append-to-existing-table, linked-table refresh and write-through remain unimplemented.
+Per-column skip/rename/type/length/required/unique settings and existing or generated primary keys now apply to external imports. Plans are session-local, not saved Access specifications or recurring jobs. Imported destination text is capped at 16,777,216 UTF-16 characters across pages. Selected fields avoid destination materialization/validation of skipped values; source adapters still fetch complete pages. Direct-to-existing-table external imports, linked-table refresh and write-through remain unimplemented.
+
+### Local append workspace (preview.6)
+
+[Append Records](APPEND.md) maps a current local datasheet view to an existing table, including filtered views, self-appends and previously imported copies. It retains destination types/defaults/constraints, uses a safe-default confirmation, and publishes one undoable transaction. The bulk API shares unchanged records but still scans applicable constraints and copies record-list containers. It is not a streaming remote append, persistent import specification, or asynchronous browser execution engine.

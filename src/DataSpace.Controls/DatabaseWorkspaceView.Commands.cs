@@ -43,6 +43,7 @@ public sealed partial class DatabaseWorkspaceView
             case "onlineDatabase": await ExternalDataAsync("PostgreSQL"); break;
             case "exportJson": await ExportSourceAsync(false); break;
             case "exportSqlite": await ExportSourceAsync(true); break;
+            case "appendRecords": await AppendCurrentViewAsync(); break;
             case "importCsv": await ImportCsvAsync(); break;
             case "exportCsv": await ExportCsvAsync(); break;
             case "exportDatabase": await ExportAsync(Workspace.Document.Name + ".dspace", "application/json", Encoding.UTF8.GetBytes(DocumentCodec.Serialize(Workspace.Document))); break;
