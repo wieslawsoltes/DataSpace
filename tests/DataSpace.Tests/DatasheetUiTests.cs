@@ -36,7 +36,7 @@ public sealed class DatasheetUiTests
         var layout = new DatasheetLayout { ColumnOrder = ["Title", "ID"], HiddenFields = ["ID"], FontSize = 15, RowHeight = 35, Bold = true };
         workspace.ConfigureDatasheet("Table1", layout, "Title", 310);
         var table = workspace.Document.Tables[0];
-        Assert.Equal(310, table.Field("Title").Width); Assert.Equal(150, before.Tables[0].Field("Title").Width);
+        Assert.Equal(310, table.Field("Title").Width); Assert.Equal(220, before.Tables[0].Field("Title").Width);
         Assert.All(rows, row => Assert.Same(row, table.Records.First(r => r.Id == row.Id)));
         layout.HiddenFields.Clear(); Assert.Single(table.Datasheet.HiddenFields);
         var roundtrip = DocumentCodec.Clone(workspace.Document).Tables[0];

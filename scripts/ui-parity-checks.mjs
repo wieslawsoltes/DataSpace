@@ -6,6 +6,10 @@ import { activateDialogButton } from './native-dialog-actions.mjs';
 export async function uiParityChecks(page, baseURL, screenshots, ready) {
     let checks = 0;
     const peer = (role, name) => page.getByRole(role, { name, exact: true }).last();
+    async function enableAccessibility() {
+        const enable = page.getByRole('button', { name: 'Enable accessibility', exact: true });
+        if (await enable.count()) await enable.press('Enter');
+    }
     async function button(name, dialog = false) {
         const target = peer('button', name);
         if (dialog) await activateDialogButton(page, target, name); else await target.press('Enter');
@@ -42,6 +46,7 @@ export async function uiParityChecks(page, baseURL, screenshots, ready) {
         throw new Error('Saved UI operation did not reach the expected state.');
     }
     try {
+        await enableAccessibility();
         // Use the small mapped fixture created through the existing real import workflow.
         await button('Mapped_Import_Test'); await button('Table Fields');
         await page.screenshot({ path: screenshots + '/table-context-ribbon.png', fullPage: true }); checks++;
@@ -58,7 +63,7 @@ export async function uiParityChecks(page, baseURL, screenshots, ready) {
         assert.match(await page.locator('body').ariaSnapshot(), /Row height must be/); await button('Cancel', true); checks++;
         await page.keyboard.press('Control+z'); await saved(db => db.Tables.find(t => t.Name === 'Mapped_Import_Test').Datasheet.RowHeight === 27); checks++;
         await page.keyboard.press('Control+y'); await saved(db => db.Tables.find(t => t.Name === 'Mapped_Import_Test').Datasheet.RowHeight === 36); checks++;
-        await page.reload({ waitUntil: 'domcontentloaded' }); await ready();
+        await page.reload({ waitUntil: 'domcontentloaded' }); await ready(); await enableAccessibility();
         await button('Mapped_Import_Test'); await button('Table Fields');
         await page.screenshot({ path: screenshots + '/saved-datasheet-layout.png', fullPage: true });
         assert.equal((await database()).Tables.find(t => t.Name === 'Mapped_Import_Test').Datasheet.HiddenFields[0], 'ExternalID'); checks++;
