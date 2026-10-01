@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { activateMenuItem } from './native-dialog-actions.mjs';
 
 /** Real header/pointer/keyboard input at the fixed 1600×1000 CI workspace size. */
 export async function columnSelectionChecks(page, screenshots, database, saved, ready) {
@@ -32,7 +33,7 @@ export async function columnSelectionChecks(page, screenshots, database, saved, 
     try { await click(original, 'active'); } finally { await page.keyboard.up('Shift'); }
     // Right-clicking inside the selected range must retain the entire selection.
     await click(original, 'title', { button: 'right' });
-    await page.getByRole('menuitem', { name: 'Freeze Fields', exact: true }).press('Enter');
+    await activateMenuItem(page, page.getByRole('menuitem', { name: 'Freeze Fields', exact: true }), 'Freeze Fields');
     const frozen = table(await saved(db => table(db).Datasheet.FrozenFields.includes('active')));
     assert.deepEqual(frozen.Datasheet.FrozenFields, ['RowID', 'title', 'active']);
     assert.deepEqual(frozen.Records, original.Records); assert.deepEqual(frozen.Fields, original.Fields); checks++;

@@ -1,7 +1,7 @@
 import { columnSelectionChecks } from './column-selection-checks.mjs';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
-import { activateDialogButton } from './native-dialog-actions.mjs';
+import { activateDialogButton, activateMenuItem } from './native-dialog-actions.mjs';
 import { contextRibbonChecks } from './context-ribbon-checks.mjs';
 
 /** Native Uno interactions; model reads are assertions only, never application-command backdoors. */
@@ -90,9 +90,11 @@ export async function uiParityChecks(page, baseURL, screenshots, ready) {
         await button('Datasheet View'); checks++;
         await button('Help'); await button('Navigation Pane'); await button('Navigation Pane'); checks++;
         const objectButtons = await page.getByRole('button', { name: 'Mapped_Import_Test', exact: true }).count();
-        await button('All Access Objects ▾'); await peer('menuitem', 'Queries').press('Enter'); await page.waitForTimeout(200);
+        await button('All Access Objects ▾'); await activateMenuItem(page, peer('menuitem', 'Queries'), 'Queries');
+        await peer('button', 'Queries ▾').waitFor({ state: 'attached', timeout: 5000 });
         assert.equal(await page.getByRole('button', { name: 'Mapped_Import_Test', exact: true }).count(), objectButtons - 1); checks++;
-        await button('Queries ▾'); await peer('menuitem', 'All Access Objects').press('Enter'); await page.waitForTimeout(200);
+        await button('Queries ▾'); await activateMenuItem(page, peer('menuitem', 'All Access Objects'), 'All Access Objects');
+        await peer('button', 'All Access Objects ▾').waitFor({ state: 'attached', timeout: 5000 });
         await button('JSON_Import_Test'); await button('Mapped_Import_Test');
         await page.keyboard.press('Control+Tab'); await page.keyboard.press('Control+Shift+Tab'); checks++;
         await button('Help'); await button('Close All');
