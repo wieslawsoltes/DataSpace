@@ -175,6 +175,13 @@ public static class RecordOperations
         Names.Validate(newName); var table = document.Table(tableName);
         if (!Names.Equal(oldName, newName) && table.Fields.Any(f => Names.Equal(f.Name, newName))) throw new DataSpaceException("Field name already exists.");
         table.Field(oldName).Name = newName;
+        // Bind presentation to the renamed field, not to an obsolete spelling.
+        // Remove stale destination-name entries so they cannot contribute old flags.
+        foreach (var names in new[] { table.Datasheet.ColumnOrder, table.Datasheet.HiddenFields, table.Datasheet.FrozenFields })
+        {
+            if (!Names.Equal(oldName, newName)) names.RemoveAll(name => Names.Equal(name, newName));
+            for (var i = 0; i < names.Count; i++) if (Names.Equal(names[i], oldName)) names[i] = newName;
+        }
         foreach (var row in table.Records) { var value = row[oldName]; row.Values.Remove(oldName); row[newName] = value; }
         foreach (var index in table.Indexes) for (var i = 0; i < index.Fields.Count; i++) if (Names.Equal(index.Fields[i], oldName)) index.Fields[i] = newName;
         foreach (var relation in document.Relationships)
