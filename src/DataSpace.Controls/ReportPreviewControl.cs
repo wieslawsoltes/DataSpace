@@ -16,6 +16,7 @@ public sealed class ReportPreviewControl : UserControl, IDatabaseEditor
     private long _revision;
     private int _page;
     private float _zoom = 1;
+    private readonly Slider _zoomSlider = new() { Width = 180, Minimum = 50, Maximum = 180, Value = 100 };
     private readonly DateTime _generatedAt = DateTime.Now;
     public bool HasPendingChanges { get; private set; }
     public event Action<string>? Error;
@@ -26,7 +27,7 @@ public sealed class ReportPreviewControl : UserControl, IDatabaseEditor
         _report = new() { Name = report.Name, Source = report.Source, Title = report.Title, Fields = report.Fields.ToList(), Landscape = report.Landscape, ShowTotals = report.ShowTotals };
         var root = OfficeVisuals.Grid("Auto,*", design ? "*,285" : "*");
         var toolbar = OfficeVisuals.Row(OfficeVisuals.Button("Previous Page", () => Navigate(-1)), _pageLabel, OfficeVisuals.Button("Next Page", () => Navigate(1)));
-        var zoom = new Slider { Width = 180, Minimum = 50, Maximum = 180, Value = 100 };
+        var zoom = _zoomSlider;
         zoom.ValueChanged += (_, _) => { _zoom = (float)zoom.Value / 100; Invalidate(); }; toolbar.Children.Add(zoom); toolbar.Margin = new(10);
         OfficeVisuals.Add(root, toolbar, columnSpan: design ? 2 : 1);
         _surface.Margin = new(24); _surface.Painter = (canvas, _, _) => { canvas.Save(); canvas.Scale(_zoom); _renderer.DrawPage(canvas, _report, _data.Fields, _data.Records, _page, _generatedAt); canvas.Restore(); };
@@ -81,6 +82,18 @@ public sealed class ReportPreviewControl : UserControl, IDatabaseEditor
         _pageLabel.Text = $"Page {_page + 1} of {layout.PageCount(_data.Records.Count)} · {_data.Records.Count:N0} records"; _surface.Invalidate();
     }
     public byte[] ExportPdf() { Commit(); return _renderer.ExportPdf(_report, _data.Fields, _data.Records, _generatedAt); }
+    public void ExecuteRibbon(string command)
+    {
+        switch (command)
+        {
+            case "reportPrevious": Navigate(-1); break;
+            case "reportNext": Navigate(1); break;
+            case "reportPortrait": _report.Landscape = false; HasPendingChanges = true; Invalidate(); break;
+            case "reportLandscape": _report.Landscape = true; HasPendingChanges = true; Invalidate(); break;
+            case "reportZoomOut": _zoomSlider.Value = Math.Max(50, _zoomSlider.Value - 10); break;
+            case "reportZoomIn": _zoomSlider.Value = Math.Min(180, _zoomSlider.Value + 10); break;
+        }
+    }
     public void Commit()
     {
         if (!HasPendingChanges) return;

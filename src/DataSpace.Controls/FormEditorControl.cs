@@ -174,6 +174,17 @@ public sealed class FormEditorControl : UserControl, IDatabaseEditor
         Number("Width", control.Width, 16, 10000, value => control.Width = value); Number("Height", control.Height, 16, 10000, value => control.Height = value);
         Number("Font Size", control.FontSize, 6, 120, value => control.FontSize = value);
     }
+    public void ExecuteRibbon(string command)
+    {
+        if (!_design) return;
+        switch (command)
+        {
+            case "formLabel": Add(LayoutControlKind.Label, null); break;
+            case "formHeading": Add(LayoutControlKind.Heading, null); break;
+            case "formDelete": DeleteSelected(); break;
+            case "propertySheet": _root.ColumnDefinitions[1].Width = new(_root.ColumnDefinitions[1].Width.Value == 0 ? 285 : 0); break;
+        }
+    }
     public void Commit()
     {
         if (!HasPendingChanges) return;

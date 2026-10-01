@@ -15,7 +15,7 @@ public static class DocumentSnapshot
             Tables = source.Tables.Select(t => new TableDefinition
             {
                 Name = t.Name, Description = t.Description, NextAutoNumber = t.NextAutoNumber,
-                DiagramX = t.DiagramX, DiagramY = t.DiagramY,
+                DiagramX = t.DiagramX, DiagramY = t.DiagramY, Datasheet = t.Datasheet.Copy(),
                 Fields = t.Fields.Select(TableSchemaDraft.Copy).ToList(),
                 Records = shareRecords ? new(t.Records) : t.Records.Select(CopyRecord).ToList(),
                 Indexes = t.Indexes.Select(i => new IndexDefinition { Name = i.Name, Unique = i.Unique, Fields = new(i.Fields) }).ToList()

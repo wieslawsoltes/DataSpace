@@ -1,6 +1,6 @@
 # Compatibility and remaining work
 
-DataSpace 0.2.0-preview.6 is an independent Access-style application, not a drop-in Microsoft Access replacement. The table distinguishes implemented workflows from remaining compatibility boundaries.
+DataSpace 0.2.0-preview.7 is an independent Access-style application, not a drop-in Microsoft Access replacement. The table distinguishes implemented workflows from remaining compatibility boundaries.
 
 | Area | Implemented | Material remaining work |
 | --- | --- | --- |
@@ -48,3 +48,7 @@ Per-column skip/rename/type/length/required/unique settings and existing or gene
 ### Local append workspace (preview.6)
 
 [Append Records](APPEND.md) maps a current local datasheet view to an existing table, including filtered views, self-appends and previously imported copies. It retains destination types/defaults/constraints, uses a safe-default confirmation, and publishes one undoable transaction. The bulk API shares unchanged records but still scans applicable constraints and copies record-list containers. It is not a streaming remote append, persistent import specification, or asynchronous browser execution engine.
+
+### Workspace UI extension (preview.7)
+
+Contextual editor tabs, saved table datasheet layout (column visibility/order/freeze, row height, font size/bold, shading/gridlines), literal Find/Replace, navigation type filtering/sorting/session hiding and document closing/cycling are implemented. See [UI coverage](UI-COVERAGE.md). Query/form datasheets do not yet persist those table layout preferences. Navigation preferences are session-only; custom category groups and date/detail views are not implemented. Search wildcard expressions, every Access control/dialog/wizard, ribbon XML customization/KeyTips and full printing/accessibility/native-platform parity remain open.

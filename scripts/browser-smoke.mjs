@@ -1,3 +1,4 @@
+import { uiParityChecks } from "./ui-parity-checks.mjs";
 import { externalBrowserChecks } from './external-browser-checks.mjs';
 import { subqueryBrowserChecks } from './subquery-browser-checks.mjs';
 import assert from 'node:assert/strict';
@@ -101,6 +102,7 @@ try {
         checks += await crosstabBrowserChecks(page, baseURL, screenshots, ready);
         checks += await subqueryBrowserChecks(page, baseURL, screenshots, ready);
         checks += await externalBrowserChecks(page, baseURL, screenshots, ready);
+        checks += await uiParityChecks(page, baseURL, screenshots, ready);
         assert.deepEqual(failures, [], 'No unhandled browser exceptions or missing runtime assets.'); checks++;
         console.log(`PASS: ${checks} browser checks (IndexedDB races, corruption, Unicode, Uno startup, cell edit/save/reload and external database workflows).`);
     } finally {

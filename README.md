@@ -11,7 +11,7 @@
 
 DataSpace brings an Office-style ribbon, searchable object navigation, tabbed objects, editable datasheets, graphical queries, form design, report previews and relationship diagrams to a shared .NET codebase. The browser is the actual Uno/Skia application compiled to WebAssembly—not an HTML mockup or a separate front end.
 
-> **0.2.0-preview.6:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
+> **0.2.0-preview.7:** an independent Access-style implementation, not complete or verified pixel-for-pixel Microsoft Access parity. Native `.accdb`/`.mdb`, ACE/Jet, VBA and the full Access feature set are not supported. Read the [compatibility matrix](docs/COMPATIBILITY.md) before planning a migration.
 
 ## Workspace
 
@@ -44,6 +44,12 @@ Online database credentials and allowlisted table definitions are configured on 
 **Field Options** in the source dialog adds per-column selection, local field names, explicit types, required/unique constraints and existing or generated primary keys. Plans are frozen before import, and errors retain the dialog draft without committing a partial table. Selective import avoids materializing discarded destination fields; source pages are still read in full. See the [field options and limits](docs/EXTERNAL-DATA.md#import-field-options).
 
 **Append to existing local tables:** after importing a source, use **External Data → Append Records** to map the current datasheet view into a destination table. Matching names are preselected, AutoNumber is regenerated unless explicitly mapped, and destination constraints are enforced atomically. The confirmation defaults to Cancel; a successful append is one undo step. See [append behavior and API](docs/APPEND.md).
+
+## Workspace UI extension
+
+Contextual Table Fields, Table Design, Query Design, Form and Print Preview tabs expose working editor actions. Table datasheets save hidden/ordered/frozen columns, row height, font size/bold, alternating shading and gridline options. **Home → Find / Replace** searches literal stored or formatted values in the current view; replacing is atomic, raw-value only, and Replace All requires explicit confirmation. **Help → Navigation Pane / Close Object / Close All** and document-tab context menus manage the workspace. The navigation header filters object types, sorts names, collapses groups and controls session-only hidden objects and click behavior.
+
+See [UI coverage and usage](docs/UI-COVERAGE.md) for exact scope, commands and remaining Access UI gaps. This extension does not implement every Access dialog or control.
 
 ## Build and run
 

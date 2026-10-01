@@ -10,10 +10,19 @@ public sealed partial class DatabaseWorkspaceView
     private async Task ExecuteCoreAsync(string id)
     {
         if (id == "collapseRibbon") { _ribbon.ToggleCollapsed(); return; }
-        if (id == "find") { _navigator.FocusSearch(); return; }
+        if (id == "quickFind") { _navigator.FocusSearch(); return; }
+        if (id == "toggleNavigation") { ToggleNavigation(); return; }
+        if (id == "closeObject") { if (_active is not null) CloseObject(_active); return; }
+        if (id == "closeAll") { CloseDocumentsExcept(null); return; }
+        // Contextual editor commands modify their detached draft; do not commit/reset the selected field first.
+        if (id.StartsWith("field", StringComparison.Ordinal) || id.StartsWith("query", StringComparison.Ordinal) || id.StartsWith("form", StringComparison.Ordinal) && id != "formatDatasheet" || id.StartsWith("report", StringComparison.Ordinal) || id is "propertySheet" or "designView" or "datasheetView")
+        { await ExecuteContextAsync(id); return; }
         CommitActive();
         switch (id)
         {
+            case "find": case "replace": await FindReplaceAsync(id == "replace"); break;
+            case "columns": case "hideFields": case "freezeFields": case "unfreezeFields": case "columnWidth": case "formatDatasheet": await ConfigureDatasheetAsync(id); break;
+            case "bestFit": _sheet?.BestFitSelectedColumn(); break;
             case "file": ShowBackstage(); break;
             case "save": if (SaveDatabaseAsync is null) throw new DataSpaceException("No storage adapter is configured."); await SaveDatabaseAsync(); ShowStatus("Database saved"); break;
             case "open": await OpenDatabaseAsync(); break;

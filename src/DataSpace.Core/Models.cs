@@ -21,6 +21,7 @@ public sealed class DatabaseDocument
 
 public sealed class TableDefinition
 {
+    public DatasheetLayout Datasheet { get; set; } = new();
     public string Name { get; set; } = "Table1";
     public string Description { get; set; } = "";
     public List<FieldDefinition> Fields { get; set; } = [];

@@ -6,7 +6,7 @@ namespace DataSpace.Controls;
 public sealed record CellEdit(string RecordId, string Field, string? Value);
 
 /// <summary>Two-axis virtualized datasheet; consumes lazy views without eagerly copying records.</summary>
-public sealed class DatasheetControl : UserControl, IDisposable
+public sealed partial class DatasheetControl : UserControl, IDisposable
 {
     private readonly DatasheetRenderer _renderer = new();
     private readonly SkiaSurface _surface = new();
@@ -58,7 +58,18 @@ public sealed class DatasheetControl : UserControl, IDisposable
         Content = root; _viewport.SizeChanged += (_, _) => UpdateScrollbars();
         _surface.PointerPressed += OnPressed; _surface.PointerMoved += OnMoved; _surface.PointerReleased += OnReleased;
         _surface.PointerCaptureLost += (_, _) => { _selecting = false; _selectionCaptured = false; _resizeColumn = -1; };
-        _surface.DoubleTapped += (_, e) => { e.Handled = true; DispatcherQueue.TryEnqueue(() => { if (IsLoaded) BeginEdit(); }); };
+        _surface.DoubleTapped += (_, e) =>
+        {
+            var point = e.GetPosition(_surface);
+            var hit = _renderer.HitTest(_fields, _records.Count, ViewState, (float)point.X, (float)point.Y);
+            e.Handled = true;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!IsLoaded) return;
+                if (hit.Kind == GridHitKind.ColumnResize) { ViewState.SelectedColumn = hit.Column; BestFitSelectedColumn(); }
+                else if (hit.Kind == GridHitKind.Cell) BeginEdit();
+            });
+        };
         _surface.PointerWheelChanged += (_, e) =>
         {
             if (!FinishEdit(false)) return;
@@ -70,6 +81,10 @@ public sealed class DatasheetControl : UserControl, IDisposable
         KeyDown += OnKeyDown;
         var menu = new MenuFlyout();
         void Item(string text, Action action) { var item = new MenuFlyoutItem { Text = text }; item.Click += (_, _) => action(); menu.Items.Add(item); }
+        Item("Hide Fields", () => LayoutCommand?.Invoke("hideFields")); Item("Unhide Fields", () => LayoutCommand?.Invoke("columns"));
+        Item("Freeze Fields", () => LayoutCommand?.Invoke("freezeFields")); Item("Unfreeze All Fields", () => LayoutCommand?.Invoke("unfreezeFields"));
+        Item("Column Width", () => LayoutCommand?.Invoke("columnWidth")); Item("Best Fit", BestFitSelectedColumn);
+        Item("Datasheet Formatting", () => LayoutCommand?.Invoke("formatDatasheet"));
         Item("Edit cell", () => BeginEdit()); Item("Copy", async () => await CopyAsync()); Item("Paste", async () => await PasteAsync());
         menu.Items.Add(new MenuFlyoutSeparator());
         Item("Sort A to Z", () => { if (_fields.Count > 0) SortRequested?.Invoke(_fields[ViewState.SelectedColumn].Name, false); });
@@ -78,10 +93,11 @@ public sealed class DatasheetControl : UserControl, IDisposable
     }
     public void SetData(IReadOnlyList<FieldDefinition> fields, IReadOnlyList<Record> records, bool readOnly = false)
     {
-        var selectedId = SelectedRecord?.Id;
+        var selectedId = SelectedRecord?.Id; var selectedField = SelectedField?.Name;
         _fields = fields; _records = records; ViewState.ReadOnly = readOnly;
         var index = selectedId is null ? -1 : RecordIdentity.IndexOf(records, selectedId);
         ViewState.SelectedRow = Math.Clamp(index >= 0 ? index : ViewState.SelectedRow, 0, Math.Max(0, records.Count - 1));
+        if (selectedField is not null) { var found = fields.ToList().FindIndex(f => Names.Equal(f.Name, selectedField)); if (found >= 0) ViewState.SelectedColumn = found; }
         ViewState.SelectedColumn = Math.Clamp(ViewState.SelectedColumn, 0, Math.Max(0, fields.Count - 1));
         ViewState.AnchorRow = Math.Clamp(ViewState.AnchorRow, 0, Math.Max(0, records.Count - 1));
         ViewState.AnchorColumn = Math.Clamp(ViewState.AnchorColumn, 0, Math.Max(0, fields.Count - 1));
@@ -105,7 +121,8 @@ public sealed class DatasheetControl : UserControl, IDisposable
         if (!FinishEdit(false)) return;
         Focus(FocusState.Pointer); var point = e.GetCurrentPoint(_surface);
         var hit = _renderer.HitTest(_fields, _records.Count, ViewState, (float)point.Position.X, (float)point.Position.Y);
-        if (!point.Properties.IsLeftButtonPressed) return;
+        if (!point.Properties.IsLeftButtonPressed)
+        { if (point.Properties.IsRightButtonPressed && hit.Column >= 0) SelectCell(Math.Max(0, hit.Row), hit.Column); return; }
         if (hit.Kind == GridHitKind.ColumnResize)
         { _resizeColumn = hit.Column; _resizeStart = point.Position.X; _originalWidth = _fields[hit.Column].Width; _surface.CapturePointer(e.Pointer); }
         else if (hit.Kind == GridHitKind.ColumnHeader) SortRequested?.Invoke(_fields[hit.Column].Name, Names.Equal(ViewState.SortField, _fields[hit.Column].Name) && !ViewState.SortDescending);
@@ -156,7 +173,7 @@ public sealed class DatasheetControl : UserControl, IDisposable
         EnsureVisible(); var bounds = _renderer.CellBounds(_fields, ViewState.SelectedRow, ViewState.SelectedColumn, ViewState);
         _editingRecord = record.Id; _editingField = field.Name; _editing = true;
         _editor.Margin = new(bounds.Left * ViewState.Zoom, bounds.Top * ViewState.Zoom, 0, 0);
-        _editor.Width = bounds.Width * ViewState.Zoom; _editor.Height = bounds.Height * ViewState.Zoom; _editor.FontSize = 13 * ViewState.Zoom;
+        _editor.Width = bounds.Width * ViewState.Zoom; _editor.Height = bounds.Height * ViewState.Zoom; _editor.FontSize = ViewState.FontSize * ViewState.Zoom;
         _editor.Text = initialText ?? record[field.Name] ?? ""; _editor.Visibility = Visibility.Visible;
         AutomationProperties.SetName(_editor, "Edit " + field.DisplayName); _editor.Focus(FocusState.Programmatic);
         if (initialText is null) _editor.SelectAll(); else _editor.SelectionStart = _editor.Text.Length;
@@ -231,8 +248,8 @@ public sealed class DatasheetControl : UserControl, IDisposable
             case VirtualKey.Up: Move(-1, 0, extend); break; case VirtualKey.Down: Move(1, 0, extend); break;
             case VirtualKey.Left: Move(0, -1, extend); break; case VirtualKey.Right: Move(0, 1, extend); break;
             case VirtualKey.Home: SelectCell(ViewState.SelectedRow, 0, extend); break; case VirtualKey.End: SelectCell(ViewState.SelectedRow, _fields.Count - 1, extend); break;
-            case VirtualKey.PageUp: Move(-(int)(_viewport.ActualHeight / (27 * ViewState.Zoom)), 0, extend); break;
-            case VirtualKey.PageDown: Move((int)(_viewport.ActualHeight / (27 * ViewState.Zoom)), 0, extend); break;
+            case VirtualKey.PageUp: Move(-(int)(_viewport.ActualHeight / (ViewState.RowHeight * ViewState.Zoom)), 0, extend); break;
+            case VirtualKey.PageDown: Move((int)(_viewport.ActualHeight / (ViewState.RowHeight * ViewState.Zoom)), 0, extend); break;
             case VirtualKey.F2: case VirtualKey.Enter: BeginEdit(); break;
             case VirtualKey.Insert: if (!ViewState.ReadOnly) NewRecordRequested?.Invoke(); break;
             case VirtualKey.Delete: if (!ViewState.ReadOnly) DeleteRecordsRequested?.Invoke(SelectedRecordIds()); break;
@@ -243,11 +260,12 @@ public sealed class DatasheetControl : UserControl, IDisposable
     private void UpdateScrollbars()
     {
         var width = Math.Max(0, _viewport.ActualWidth / ViewState.Zoom - _renderer.Theme.RowHeaderWidth);
-        var height = Math.Max(0, _viewport.ActualHeight / ViewState.Zoom - _renderer.Theme.ColumnHeaderHeight - (ViewState.ShowTotals ? _renderer.Theme.RowHeight : 0));
+        var height = Math.Max(0, _viewport.ActualHeight / ViewState.Zoom - _renderer.Theme.ColumnHeaderHeight - (ViewState.ShowTotals ? ViewState.RowHeight : 0));
         _horizontal.Maximum = Math.Max(0, _renderer.ContentWidth(_fields) - _renderer.Theme.RowHeaderWidth - width);
-        _horizontal.ViewportSize = width; _horizontal.SmallChange = 30; _horizontal.LargeChange = Math.Max(30, width);
+        var scrollingWidth = Math.Max(0, width - (_renderer.FrozenEdge(_fields, ViewState) - _renderer.Theme.RowHeaderWidth));
+        _horizontal.ViewportSize = scrollingWidth; _horizontal.SmallChange = 30; _horizontal.LargeChange = Math.Max(30, scrollingWidth);
         _vertical.Maximum = Math.Max(0, _renderer.ContentHeight(_records.Count, ViewState) - _renderer.Theme.ColumnHeaderHeight - height);
-        _vertical.ViewportSize = height; _vertical.SmallChange = 27; _vertical.LargeChange = Math.Max(27, height);
+        _vertical.ViewportSize = height; _vertical.SmallChange = ViewState.RowHeight; _vertical.LargeChange = Math.Max(27, height);
         _horizontal.Value = Math.Clamp(_horizontal.Value, 0, _horizontal.Maximum); _vertical.Value = Math.Clamp(_vertical.Value, 0, _vertical.Maximum);
         ViewState.OffsetX = (float)_horizontal.Value; ViewState.OffsetY = (float)_vertical.Value; _surface.Invalidate();
     }
@@ -255,8 +273,9 @@ public sealed class DatasheetControl : UserControl, IDisposable
     {
         var bounds = _renderer.CellBounds(_fields, ViewState.SelectedRow, ViewState.SelectedColumn, ViewState);
         var width = _viewport.ActualWidth / ViewState.Zoom; var height = _viewport.ActualHeight / ViewState.Zoom;
-        if (bounds.Left < _renderer.Theme.RowHeaderWidth) _horizontal.Value = Math.Clamp(_horizontal.Value + bounds.Left - _renderer.Theme.RowHeaderWidth, 0, _horizontal.Maximum);
-        else if (bounds.Right > width) _horizontal.Value = Math.Clamp(_horizontal.Value + bounds.Right - width, 0, _horizontal.Maximum);
+        var leftEdge = ViewState.SelectedColumn < ViewState.FrozenColumnCount ? _renderer.Theme.RowHeaderWidth : _renderer.FrozenEdge(_fields, ViewState);
+        if (ViewState.SelectedColumn >= ViewState.FrozenColumnCount && bounds.Left < leftEdge) _horizontal.Value = Math.Clamp(_horizontal.Value + bounds.Left - leftEdge, 0, _horizontal.Maximum);
+        else if (ViewState.SelectedColumn >= ViewState.FrozenColumnCount && bounds.Right > width) _horizontal.Value = Math.Clamp(_horizontal.Value + bounds.Right - width, 0, _horizontal.Maximum);
         if (bounds.Top < _renderer.Theme.ColumnHeaderHeight) _vertical.Value = Math.Clamp(_vertical.Value + bounds.Top - _renderer.Theme.ColumnHeaderHeight, 0, _vertical.Maximum);
         else if (bounds.Bottom > height) _vertical.Value = Math.Clamp(_vertical.Value + bounds.Bottom - height, 0, _vertical.Maximum);
     }

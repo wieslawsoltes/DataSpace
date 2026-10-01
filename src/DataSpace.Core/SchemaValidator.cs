@@ -64,6 +64,8 @@ public static class SchemaValidator
 
     public static void ValidateTable(TableDefinition table)
     {
+        if (table.Datasheet is null) throw new DataSpaceException("Datasheet layout must not be null.");
+        table.Datasheet.Validate();
         if (table.Fields is null || table.Records is null || table.Indexes is null || table.Fields.Count is < 1 or > 256 || table.Records.Count > 1000000)
             throw new DataSpaceException("Tables require 1–256 fields and at most 1,000,000 records.");
         UniqueNames(table.Fields.Select(f => f.Name), "field");

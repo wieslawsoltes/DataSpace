@@ -26,7 +26,7 @@ public sealed class SourcePagingScenario : IDisposable
         for (var i = 0; i < 10; i++) pager.ReadAsync(_request).GetAwaiter().GetResult();
         var decoded = _source.MaterializedRows - before;
         if (decoded != 0 || pager.Reads != 1 || pager.CacheHits != 10) throw new Exception("Unexpected page-cache work.");
-        Evidence = new { append = AppendScenario.Measure(), selectiveImport = ImportProjectionScenario.Measure(), rows = RowCount, columns = ColumnCount, offset = Offset, limit = Limit,
+        Evidence = new { datasheetLayout = DatasheetLayoutScenario.Measure(), append = AppendScenario.Measure(), selectiveImport = ImportProjectionScenario.Measure(), rows = RowCount, columns = ColumnCount, offset = Offset, limit = Limit,
             utf8Bytes = System.Text.Encoding.UTF8.GetByteCount(json), cacheReads = pager.Reads,
             cacheHits = pager.CacheHits, additionalDecodedRows = decoded,
             scope = "Warm JSON page reads only. Parsing, schema scanning, row-handle index construction, file/network I/O and rendering excluded. The row-handle index adds O(row count) storage." };
