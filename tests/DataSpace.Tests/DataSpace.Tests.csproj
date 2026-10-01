@@ -4,6 +4,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.152.1" />
+    <ProjectReference Include="../../src/DataSpace.Rendering/DataSpace.Rendering.csproj" />
     <ProjectReference Include="../../src/DataSpace.Core/DataSpace.Core.csproj" />
     <ProjectReference Include="../../src/DataSpace.Query/DataSpace.Query.csproj" />
     <ProjectReference Include="../../src/DataSpace.Storage/DataSpace.Storage.csproj" />

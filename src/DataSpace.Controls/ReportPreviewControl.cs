@@ -16,6 +16,7 @@ public sealed class ReportPreviewControl : UserControl, IDatabaseEditor
     private long _revision;
     private int _page;
     private float _zoom = 1;
+    private CheckBox? _landscape;
     private readonly Slider _zoomSlider = new() { Width = 180, Minimum = 50, Maximum = 180, Value = 100 };
     private readonly DateTime _generatedAt = DateTime.Now;
     public bool HasPendingChanges { get; private set; }
@@ -45,7 +46,8 @@ public sealed class ReportPreviewControl : UserControl, IDatabaseEditor
                 catch (Exception error) { _report.Source = old; _report.Fields = fields; Error?.Invoke(error.Message); }
             };
             EditorVisuals.Labeled(properties, "Record Source", source);
-            properties.Children.Add(EditorVisuals.Check("Landscape", _report.Landscape, value => { _report.Landscape = value; HasPendingChanges = true; Invalidate(); }));
+            _landscape = EditorVisuals.Check("Landscape", _report.Landscape, value => { _report.Landscape = value; HasPendingChanges = true; Invalidate(); });
+            properties.Children.Add(_landscape);
             properties.Children.Add(OfficeVisuals.Text("Visible fields (none selected means all)", 11, "666666")); properties.Children.Add(_fieldList);
             OfficeVisuals.Add(root, OfficeVisuals.Border(EditorVisuals.Scroll(properties), "F7F7F7"), 1, 1);
         }
@@ -88,11 +90,17 @@ public sealed class ReportPreviewControl : UserControl, IDatabaseEditor
         {
             case "reportPrevious": Navigate(-1); break;
             case "reportNext": Navigate(1); break;
-            case "reportPortrait": _report.Landscape = false; HasPendingChanges = true; Invalidate(); break;
-            case "reportLandscape": _report.Landscape = true; HasPendingChanges = true; Invalidate(); break;
+            case "reportPortrait": SetLandscape(false); break;
+            case "reportLandscape": SetLandscape(true); break;
             case "reportZoomOut": _zoomSlider.Value = Math.Max(50, _zoomSlider.Value - 10); break;
             case "reportZoomIn": _zoomSlider.Value = Math.Min(180, _zoomSlider.Value + 10); break;
         }
+    }
+    private void SetLandscape(bool value)
+    {
+        if (_landscape is not null) _landscape.IsChecked = value;
+        if (_report.Landscape == value) return;
+        _report.Landscape = value; HasPendingChanges = true; Invalidate();
     }
     public void Commit()
     {

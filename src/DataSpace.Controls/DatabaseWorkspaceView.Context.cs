@@ -32,8 +32,16 @@ public sealed partial class DatabaseWorkspaceView
     private void CloseDocumentsExcept(DatabaseObjectItem? keep)
     {
         CommitActive();
-        foreach (var item in _documents.ToArray()) if (item.Key != keep?.Key) CloseObject(item);
-        if (keep is not null) ActivateDocument(keep);
+        if (keep is not null && !_documents.Any(item => item.Key == keep.Key)) return;
+        // Do not instantiate intermediate editors while closing a batch. Opening a
+        // report/query can be expensive or fail, and is not part of a close command.
+        var retainActive = keep is not null && _active?.Key == keep.Key;
+        if (!retainActive) { DisposeActive(); _active = null; }
+        _documents.RemoveAll(item => item.Key != keep?.Key);
+        foreach (var key in _documentModes.Keys.Where(key => key != keep?.Key).ToArray()) _documentModes.Remove(key);
+        if (keep is not null && !retainActive) ActivateDocument(keep);
+        else if (keep is null) EmptyView();
+        UpdateChrome();
     }
     private void AddNavigationSplitter()
     {
