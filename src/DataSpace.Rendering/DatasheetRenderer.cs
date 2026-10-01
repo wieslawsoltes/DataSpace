@@ -5,7 +5,7 @@ namespace DataSpace.Rendering;
 
 public enum GridHitKind { None, Cell, ColumnHeader, ColumnResize, RowHeader, Corner, NewRecord }
 public readonly record struct GridHit(GridHitKind Kind, int Row = -1, int Column = -1);
-public sealed class DatasheetViewState
+public sealed partial class DatasheetViewState
 {
     public int FrozenColumnCount { get; set; }
     public float RowHeight { get; set; } = 27;
@@ -102,7 +102,7 @@ public sealed class DatasheetRenderer : IDisposable
         var bodyBottom = height - (state.ShowTotals ? state.RowHeight : 0);
         var first = Math.Max(0, (int)(state.OffsetY / state.RowHeight));
         var end = Math.Min(records.Count + (state.ShowNewRecord && !state.ReadOnly ? 1 : 0), first + (int)Math.Ceiling(bodyBottom / state.RowHeight) + 2);
-        var minRow = Math.Min(state.AnchorRow, state.SelectedRow); var maxRow = Math.Max(state.AnchorRow, state.SelectedRow);
+        var (minRow, maxRow) = state.SelectedRows(records.Count);
         var minColumn = Math.Min(state.AnchorColumn, state.SelectedColumn); var maxColumn = Math.Max(state.AnchorColumn, state.SelectedColumn);
         canvas.Save(); canvas.ClipRect(new(Theme.RowHeaderWidth, Theme.ColumnHeaderHeight, width, bodyBottom));
         for (var row = first; row < end; row++)
@@ -135,7 +135,7 @@ public sealed class DatasheetRenderer : IDisposable
             }
             if (state.HorizontalGridLines) _drawing.Line(canvas, Theme.RowHeaderWidth, y + state.RowHeight - .5f, Math.Min(width, x), y + state.RowHeight - .5f, Theme.GridLine);
         }
-        if ((!frozenPass || state.SelectedColumn < state.FrozenColumnCount) && state.SelectedRow >= 0 && state.SelectedRow < records.Count && state.SelectedColumn >= 0 && state.SelectedColumn < fields.Count)
+        if (!state.WholeColumnSelection && (!frozenPass || state.SelectedColumn < state.FrozenColumnCount) && state.SelectedRow >= 0 && state.SelectedRow < records.Count && state.SelectedColumn >= 0 && state.SelectedColumn < fields.Count)
         {
             var active = CellBounds(fields, state.SelectedRow, state.SelectedColumn, state); active.Inflate(-1, -1); _drawing.Stroke(canvas, active, Theme.ActiveCell, 2);
         }
@@ -146,7 +146,7 @@ public sealed class DatasheetRenderer : IDisposable
         {
             var field = fields[i]; var rect = new SKRect(headerX, 0, headerX + (float)field.Width, Theme.ColumnHeaderHeight); headerX = rect.Right;
             if (rect.Right < Theme.RowHeaderWidth || rect.Left > width) continue;
-            if (i == state.SelectedColumn) _drawing.Fill(canvas, rect, Theme.SelectionHeader);
+            if (state.WholeColumnSelection ? i >= minColumn && i <= maxColumn : i == state.SelectedColumn) _drawing.Fill(canvas, rect, Theme.SelectionHeader);
             _drawing.Stroke(canvas, new(rect.Left - .5f, -.5f, rect.Right - .5f, rect.Bottom - .5f), Theme.GridLine);
             _drawing.CellText(canvas, field.DisplayName, new(rect.Left, rect.Top, rect.Right - 16, rect.Bottom), Theme.Text, state.FontSize);
             var cx = rect.Right - 10; var cy = rect.MidY + 1; using var arrow = new SKPath();

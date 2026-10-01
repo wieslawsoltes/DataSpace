@@ -1,3 +1,4 @@
+import { columnSelectionChecks } from './column-selection-checks.mjs';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { activateDialogButton } from './native-dialog-actions.mjs';
@@ -98,6 +99,7 @@ export async function uiParityChecks(page, baseURL, screenshots, ready) {
         assert.match(await page.locator('body').ariaSnapshot(), /Build your database/); checks++;
         checks += await contextRibbonChecks(page, screenshots, database, saved);
         await button('Mapped_Import_Test');
+        checks += await columnSelectionChecks(page, screenshots, database, saved, ready);
         await writeFile(screenshots + '/ui-parity-checks.json', JSON.stringify({ checks, persistedLayout: true, atomicReplacement: true, placeholders: false }, null, 2));
         return checks;
     } catch (error) {

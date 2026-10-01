@@ -9,13 +9,11 @@ public sealed partial class DatabaseWorkspaceView
         var selected = _sheet.SelectedField?.Name;
         if (command == "hideFields")
         {
-            if (selected is null || _sheet.Fields.Count <= 1) throw new DataSpaceException("Keep at least one field visible.");
-            if (!layout.HiddenFields.Contains(selected, StringComparer.OrdinalIgnoreCase)) layout.HiddenFields.Add(selected);
+            layout = DatasheetFieldCommands.Hide(table.Fields, layout, _sheet.SelectedFieldNames());
         }
         else if (command == "freezeFields")
         {
-            if (selected is null) return;
-            if (!layout.FrozenFields.Contains(selected, StringComparer.OrdinalIgnoreCase)) layout.FrozenFields.Add(selected);
+            layout = DatasheetFieldCommands.Freeze(table.Fields, layout, _sheet.SelectedFieldNames());
         }
         else if (command == "unfreezeFields")
         {
