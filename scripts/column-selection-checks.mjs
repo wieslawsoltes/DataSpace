@@ -43,17 +43,17 @@ export async function columnSelectionChecks(page, screenshots, database, saved, 
     assert.deepEqual(hidden.Datasheet.HiddenFields, ['ExternalID', 'title', 'active']);
     assert.deepEqual(hidden.Records, original.Records); checks++;
     await page.screenshot({ path: screenshots + '/multi-column-layout.png', fullPage: true });
-    // Hiding every remaining field fails atomically. It must not resurrect a random column.
-    await click(hidden, 'RowID'); await page.keyboard.down('Shift');
-    try { await click(hidden, 'empty'); } finally { await page.keyboard.up('Shift'); }
-    await command('hideFields');
-    assert.match(await page.locator('body').ariaSnapshot(), /Keep at least one field visible/);
-    assert.deepEqual(table(await saved(db => table(db).Datasheet.HiddenFields.length === 3)).Datasheet, hidden.Datasheet); checks++;
     // Whole-column selection is not a request to delete all records.
     await click(hidden, 'RowID'); await page.keyboard.press('Delete'); await page.waitForTimeout(200);
     assert.match(await page.locator('body').ariaSnapshot(), /Select record rows, not whole columns/);
     assert.equal(await page.getByRole('button', { name: 'Continue', exact: true }).count(), 0);
     assert.deepEqual(table(await database()).Records, original.Records); checks++;
+    // The validation banner changes the grid's vertical position. Continue with
+    // native keyboard focus, not stale pointer coordinates from before the error.
+    await page.keyboard.press('Shift+ArrowRight');
+    await command('hideFields');
+    assert.match(await page.locator('body').ariaSnapshot(), /Keep at least one field visible/);
+    assert.deepEqual(table(await saved(db => table(db).Datasheet.HiddenFields.length === 3)).Datasheet, hidden.Datasheet); checks++;
     await page.keyboard.press('Control+z');
     await saved(db => table(db).Datasheet.HiddenFields.length === 1);
     await page.keyboard.press('Control+y');
