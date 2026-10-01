@@ -176,7 +176,8 @@ public sealed class QueryDesignGrid : UserControl
         _cells.Children.Clear(); _cells.RowDefinitions.Clear(); _cells.ColumnDefinitions.Clear();
         var labels = new List<string> { "", "Field:", "Alias:", "Sort:", "Sort Order:", "Show:" }; if (_totals) labels.Add("Total:");
         labels.Add("Criteria:"); labels.AddRange(Enumerable.Repeat("or:", _criteriaRows - 1));
-        foreach (var label in labels) _cells.RowDefinitions.Add(new() { Height = new(32) }); _cells.ColumnDefinitions.Add(new() { Width = new(90) });
+        foreach (var label in labels) _cells.RowDefinitions.Add(new() { Height = label is "Field:" or "Criteria:" or "or:" ? GridLength.Auto : new(32), MinHeight = 32 });
+        _cells.ColumnDefinitions.Add(new() { Width = new(90) });
         for (var row = 0; row < labels.Count; row++)
         { var text = OfficeVisuals.Text(labels[row], 12, bold: true); text.Margin = new(8, 0, 0, 0); OfficeVisuals.Add(_cells, OfficeVisuals.Border(text, "F1F1F1", thickness: new(0, 0, 1, 1)), row); }
         for (var index = 0; index < _design.Columns.Count; index++)
@@ -189,7 +190,12 @@ public sealed class QueryDesignGrid : UserControl
             }
             void Text(string value, int row, string label, Action<string> assign)
             {
-                var previous = value; var input = OfficeVisuals.Input(value);
+                // SQL fragments can contain formatted subqueries and line comments.
+                // Set multiline mode before assigning text; single-line inputs may
+                // truncate the closing line and silently dirty an untouched design.
+                var previous = value;
+                var input = label == "Output alias" ? OfficeVisuals.Input(value) : EditorVisuals.Multiline(value);
+                input.MaxHeight = 96;
                 input.TextChanged += (_, _) => { if (input.Text == previous) return; previous = input.Text; assign(previous); Changed?.Invoke(); }; Place(input, row, label);
             }
             var actions = OfficeVisuals.Row(OfficeVisuals.Text("Column " + cellColumn, 11), OfficeVisuals.Button("←", () => Move(column, -1)), OfficeVisuals.Button("→", () => Move(column, 1)), OfficeVisuals.Button("×", () => { _design.Columns.Remove(column); Rebuild(); Changed?.Invoke(); })); Place(actions, 0, "Column actions");
