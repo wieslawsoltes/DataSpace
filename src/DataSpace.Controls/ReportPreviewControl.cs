@@ -10,7 +10,7 @@ public sealed class ReportPreviewControl : UserControl, IDatabaseEditor
     private readonly QueryEngine _engine = new();
     private readonly ReportDefinition _report;
     private readonly SkiaSurface _surface = new();
-    private readonly TextBlock _pageLabel = OfficeVisuals.Text("Page 1", 12);
+    private readonly StatusMessageControl _pageLabel = new() { Text = "Page 1" };
     private readonly StackPanel _fieldList = new() { Spacing = 0 };
     private QueryResult _data = new();
     private long _revision;
@@ -29,6 +29,7 @@ public sealed class ReportPreviewControl : UserControl, IDatabaseEditor
         var root = OfficeVisuals.Grid("Auto,*", design ? "*,285" : "*");
         var toolbar = OfficeVisuals.Row(OfficeVisuals.Button("Previous Page", () => Navigate(-1)), _pageLabel, OfficeVisuals.Button("Next Page", () => Navigate(1)));
         var zoom = _zoomSlider;
+        AutomationProperties.SetName(zoom, "Report zoom");
         zoom.ValueChanged += (_, _) => { _zoom = (float)zoom.Value / 100; Invalidate(); }; toolbar.Children.Add(zoom); toolbar.Margin = new(10);
         OfficeVisuals.Add(root, toolbar, columnSpan: design ? 2 : 1);
         _surface.Margin = new(24); _surface.Painter = (canvas, _, _) => { canvas.Save(); canvas.Scale(_zoom); _renderer.DrawPage(canvas, _report, _data.Fields, _data.Records, _page, _generatedAt); canvas.Restore(); };

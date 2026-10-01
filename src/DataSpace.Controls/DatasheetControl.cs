@@ -170,10 +170,13 @@ public sealed partial class DatasheetControl : UserControl, IDisposable
         if (ViewState.ReadOnly || SelectedRecord is not { } record || SelectedField is not { } field || field.Type == FieldType.AutoNumber) return;
         if (field.Type == FieldType.YesNo)
         { var value = FieldValues.Parse(field, record[field.Name]) is not true; CommitEdits?.Invoke([new(record.Id, field.Name, value.ToString())]); return; }
-        EnsureVisible(); var bounds = _renderer.CellBounds(_fields, ViewState.SelectedRow, ViewState.SelectedColumn, ViewState);
+        EnsureVisible();
+        var bounds = _renderer.VisibleCellBounds(_fields, ViewState.SelectedRow, ViewState.SelectedColumn, ViewState, (float)_viewport.ActualWidth, (float)_viewport.ActualHeight);
+        if (bounds.IsEmpty) { Error?.Invoke("This cell is outside the visible area. Unfreeze columns or enlarge the datasheet before editing."); return; }
         _editingRecord = record.Id; _editingField = field.Name; _editing = true;
         _editor.Margin = new(bounds.Left * ViewState.Zoom, bounds.Top * ViewState.Zoom, 0, 0);
         _editor.Width = bounds.Width * ViewState.Zoom; _editor.Height = bounds.Height * ViewState.Zoom; _editor.FontSize = ViewState.FontSize * ViewState.Zoom;
+        _editor.FontWeight = new Windows.UI.Text.FontWeight { Weight = (ushort)(ViewState.Bold ? 700 : 400) };
         _editor.Text = initialText ?? record[field.Name] ?? ""; _editor.Visibility = Visibility.Visible;
         AutomationProperties.SetName(_editor, "Edit " + field.DisplayName); _editor.Focus(FocusState.Programmatic);
         if (initialText is null) _editor.SelectAll(); else _editor.SelectionStart = _editor.Text.Length;
@@ -272,7 +275,7 @@ public sealed partial class DatasheetControl : UserControl, IDisposable
     private void EnsureVisible()
     {
         var bounds = _renderer.CellBounds(_fields, ViewState.SelectedRow, ViewState.SelectedColumn, ViewState);
-        var width = _viewport.ActualWidth / ViewState.Zoom; var height = _viewport.ActualHeight / ViewState.Zoom;
+        var width = _viewport.ActualWidth / ViewState.Zoom; var height = _viewport.ActualHeight / ViewState.Zoom - (ViewState.ShowTotals ? ViewState.RowHeight : 0);
         var leftEdge = ViewState.SelectedColumn < ViewState.FrozenColumnCount ? _renderer.Theme.RowHeaderWidth : _renderer.FrozenEdge(_fields, ViewState);
         if (ViewState.SelectedColumn >= ViewState.FrozenColumnCount && bounds.Left < leftEdge) _horizontal.Value = Math.Clamp(_horizontal.Value + bounds.Left - leftEdge, 0, _horizontal.Maximum);
         else if (ViewState.SelectedColumn >= ViewState.FrozenColumnCount && bounds.Right > width) _horizontal.Value = Math.Clamp(_horizontal.Value + bounds.Right - width, 0, _horizontal.Maximum);

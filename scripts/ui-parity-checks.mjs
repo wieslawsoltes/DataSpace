@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { activateDialogButton } from './native-dialog-actions.mjs';
+import { contextRibbonChecks } from './context-ribbon-checks.mjs';
 
 /** Native Uno interactions; model reads are assertions only, never application-command backdoors. */
 export async function uiParityChecks(page, baseURL, screenshots, ready) {
@@ -95,6 +96,7 @@ export async function uiParityChecks(page, baseURL, screenshots, ready) {
         await page.keyboard.press('Control+Tab'); await page.keyboard.press('Control+Shift+Tab'); checks++;
         await button('Help'); await button('Close All');
         assert.match(await page.locator('body').ariaSnapshot(), /Build your database/); checks++;
+        checks += await contextRibbonChecks(page, screenshots, database, saved);
         await button('Mapped_Import_Test');
         await writeFile(screenshots + '/ui-parity-checks.json', JSON.stringify({ checks, persistedLayout: true, atomicReplacement: true, placeholders: false }, null, 2));
         return checks;
