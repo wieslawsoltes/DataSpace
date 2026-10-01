@@ -37,6 +37,14 @@ export async function columnSelectionChecks(page, screenshots, database, saved, 
     const frozen = table(await saved(db => table(db).Datasheet.FrozenFields.includes('active')));
     assert.deepEqual(frozen.Datasheet.FrozenFields, ['RowID', 'title', 'active']);
     assert.deepEqual(frozen.Records, original.Records); assert.deepEqual(frozen.Fields, original.Fields); checks++;
+    // A fresh editing gesture must work after the menu has closed. Undo restores
+    // the value without undoing the preceding presentation-only freeze command.
+    await click(frozen, 'active'); await page.keyboard.press('F2');
+    await saved(db => table(db).Records[0].Values.active === 'False');
+    await page.keyboard.press('Control+z');
+    const restored = table(await saved(db => table(db).Records[0].Values.active === 'True'));
+    assert.deepEqual(restored.Records, original.Records);
+    assert.deepEqual(restored.Datasheet.FrozenFields, frozen.Datasheet.FrozenFields); checks++;
     // The equivalent range can be selected with Ctrl+Space and Shift+Right.
     await click(frozen, 'title'); await page.keyboard.press('Control+Space'); await page.keyboard.press('Shift+ArrowRight');
     await command('hideFields');

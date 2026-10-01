@@ -89,7 +89,7 @@ public sealed partial class DatasheetControl : UserControl, IDisposable
         menu.Items.Add(new MenuFlyoutSeparator());
         Item("Sort A to Z", () => { if (_fields.Count > 0) SortRequested?.Invoke(_fields[ViewState.SelectedColumn].Name, false); });
         Item("Sort Z to A", () => { if (_fields.Count > 0) SortRequested?.Invoke(_fields[ViewState.SelectedColumn].Name, true); });
-        Item("Delete record", DeleteSelectedRecords); ContextFlyout = menu;
+        Item("Delete record", DeleteSelectedRecords); GuardContextMenuInput(menu); ContextFlyout = menu;
     }
     public void SetData(IReadOnlyList<FieldDefinition> fields, IReadOnlyList<Record> records, bool readOnly = false)
     {
@@ -260,7 +260,7 @@ public sealed partial class DatasheetControl : UserControl, IDisposable
     }
     private async void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (_editing) return;
+        if (e.Handled || _editing || _contextMenuActive || !IsGridKeyOrigin(e.OriginalSource)) return;
         if (OfficeVisuals.ControlDown)
         {
             if (e.Key == VirtualKey.Space) { SelectColumns(ViewState.SelectedColumn); e.Handled = true; }
