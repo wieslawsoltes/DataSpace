@@ -12,7 +12,7 @@ public static class OfficeCommandCatalog
             new("Clipboard", [C("paste", "Paste", "paste", true, "Ctrl+V"), C("copy", "Copy", "copy", shortcut: "Ctrl+C")]),
             new("Sort & Filter", [C("ascending", "Ascending", "sort-asc"), C("descending", "Descending", "sort-desc"), C("clearFilter", "Remove Filter", "filter"), C("filter", "Filter", "filter", true)]),
             new("Records", [C("refresh", "Refresh All", "refresh", true), C("newRecord", "New", "new"), C("save", "Save", "save", shortcut: "Ctrl+S"), C("deleteRecord", "Delete", "delete"), C("totals", "Totals", "totals")]),
-            new("Find", [C("find", "Find", "search", true, "Ctrl+F"), C("selectAll", "Select All", "table")]),
+            new("Find", [C("find", "Find", "search", true, "Ctrl+F"), C("replace", "Replace", "replace", shortcut: "Ctrl+H"), C("selectAll", "Select All", "table")]),
             new("History", [C("undo", "Undo", "undo", shortcut: "Ctrl+Z"), C("redo", "Redo", "redo", shortcut: "Ctrl+Y")])]),
         new("create", "Create", [
             new("Tables", [C("newTable", "Table", "table", true), C("tableDesign", "Table Design", "design", true)]),
@@ -27,6 +27,6 @@ public static class OfficeCommandCatalog
             new("Relationships", [C("relationships", "Relationships", "relationships", true)]),
             new("Database", [C("validate", "Validate Database", "check", true), C("save", "Save Database", "save", true)]),
             new("Developer", [C("newQuery", "SQL Query", "query", true)])]),
-        new("help", "Help", [new("DataSpace", [C("about", "About DataSpace", "info", true), C("shortcuts", "Keyboard Shortcuts", "info", true)])])
+        new("help", "Help", [new("Window", [C("toggleNavigation", "Navigation Pane", "table"), C("closeObject", "Close Object", "delete"), C("closeAll", "Close All", "delete")]), new("DataSpace", [C("about", "About DataSpace", "info", true), C("shortcuts", "Keyboard Shortcuts", "info", true)])])
     ];
 }

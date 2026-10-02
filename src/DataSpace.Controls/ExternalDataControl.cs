@@ -3,7 +3,7 @@ using DataSpace.DataSources;
 namespace DataSpace.Controls;
 
 /// <summary>Access-style Get External Data workspace: source selection, bounded read-only preview and explicit local-copy import.</summary>
-public sealed class ExternalDataControl : UserControl, IAsyncDisposable
+public sealed partial class ExternalDataControl : UserControl, IAsyncDisposable
 {
     private readonly Func<string, Task<string?>>? _pickText;
     private readonly Func<Task<IDataSource?>>? _pickSqlite;
@@ -83,9 +83,13 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
         OfficeVisuals.Add(footer, note, 1, columnSpan: 3); OfficeVisuals.Add(root, footer, 2, columnSpan: 2);
         Content = root;
         _provider.SelectedItem = initialProvider;
-        _provider.SelectionChanged += (_, _) => { if (!_busy) { SetMode(); _ = ClearSourceAsync(); } };
-        _sourceList.SelectionChanged += (_, _) => { if (!_changing && !_busy && _sourceList.SelectedItem is GatewaySource source) Run(ct => UseSourceAsync(new GatewayDataSource(_address.Text, _token.Password, source), ct), _sourceList); };
-        _tables.SelectionChanged += (_, _) => { if (!_changing && !_busy) Run(ct => PageAsync(0, ct), _tables); };
+        OnCommittedSelection(_provider, () => Run(async _ => { SetMode(); await ClearSourceAsync(); }, _provider));
+        OnCommittedSelection(_sourceList, () =>
+        {
+            if (_sourceList.SelectedItem is GatewaySource source)
+                Run(ct => UseSourceAsync(new GatewayDataSource(_address.Text, _token.Password, source), ct), _sourceList);
+        });
+        OnCommittedSelection(_tables, () => Run(ct => PageAsync(0, ct), _tables));
         SetMode(); UpdateButtons();
     }
     private void SetMode()
@@ -238,6 +242,6 @@ public sealed class ExternalDataControl : UserControl, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return; _disposed = true; _operation?.Cancel(); _token.Password = "";
-        await ClearSourceAsync(); _preview.Dispose(); _viewHost.Children.Clear(); Content = null;
+        await ClearSourceAsync(); _preview.Dispose(); Content = null;
     }
 }

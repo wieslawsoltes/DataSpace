@@ -15,7 +15,7 @@ public static class DocumentSnapshot
             Tables = source.Tables.Select(t => new TableDefinition
             {
                 Name = t.Name, Description = t.Description, NextAutoNumber = t.NextAutoNumber,
-                DiagramX = t.DiagramX, DiagramY = t.DiagramY,
+                DiagramX = t.DiagramX, DiagramY = t.DiagramY, Datasheet = t.Datasheet.Copy(),
                 Fields = t.Fields.Select(TableSchemaDraft.Copy).ToList(),
                 Records = shareRecords ? new(t.Records) : t.Records.Select(CopyRecord).ToList(),
                 Indexes = t.Indexes.Select(i => new IndexDefinition { Name = i.Name, Unique = i.Unique, Fields = new(i.Fields) }).ToList()
@@ -34,11 +34,7 @@ public static class DocumentSnapshot
             Forms = source.Forms.Select(f => new FormDefinition
             {
                 Name = f.Name, Title = f.Title, Source = f.Source, Width = f.Width, Height = f.Height,
-                Controls = f.Controls.Select(c => new LayoutControl
-                {
-                    Id = c.Id, Kind = c.Kind, Field = c.Field, Caption = c.Caption,
-                    X = c.X, Y = c.Y, Width = c.Width, Height = c.Height, FontSize = c.FontSize
-                }).ToList()
+                Controls = f.Controls.Select(c => c.Copy()).ToList()
             }).ToList(),
             Reports = source.Reports.Select(r => new ReportDefinition
             {

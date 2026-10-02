@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { activateDialogButton } from './native-dialog-actions.mjs';
+import { saveReadyTable } from './workspace-readiness.mjs';
 
 /** Real local SQLite WASM worker, HTTP gateway and native Uno source workflows. */
 export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
@@ -69,16 +70,27 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.insertText(value); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
         assert.equal(await input.inputValue(), value);
     }
-    async function selectIndex(name, index, currentIndex = 0) {
+    async function selectIndex(name, index, currentIndex = 0, verifyHeldEnter = false) {
         const combo = peer('combobox', name); await focusNative(combo, name);
-        // Open the native popup before accepting an item. Enter on a collapsed
-        // selector can activate the parent dialog's default Close button.
-        await page.keyboard.press('Space'); await page.waitForTimeout(200);
+        // Alt+Down explicitly opens a native selector even during type-ahead.
+        // Space can be consumed as search text; a second Enter must not activate
+        // the containing dialog's default action after a failed open.
+        await page.keyboard.press('Alt+ArrowDown'); await page.waitForTimeout(200);
+        assert.equal(await combo.getAttribute('aria-expanded'), 'true', name + ' popup must actually open.');
         // Home does not move the focused native popup item on every Uno backend.
         // Navigate from the known selected item rather than assuming it reset to zero.
         const delta = index - currentIndex;
         for (let step = 0; step < Math.abs(delta); step++) { await page.keyboard.press(delta < 0 ? 'ArrowUp' : 'ArrowDown'); await page.waitForTimeout(80); }
-        await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+        if (verifyHeldEnter) {
+            await page.keyboard.down('Enter');
+            try {
+                await page.waitForTimeout(120);
+                assert.equal(await peer('button', 'Cancel operation').isEnabled(), false);
+                await status(/records 1–1.*1 page reads \/ 0 cache hits/);
+                checks++;
+            } finally { await page.keyboard.up('Enter'); }
+        } else await page.keyboard.press('Enter');
+        await page.waitForTimeout(200);
     }
     async function status(pattern) {
         let snapshot = '';
@@ -94,9 +106,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         }, baseURL);
     }
     async function saveTable(name, count) {
-        await page.keyboard.press('Control+s');
-        for (let attempt = 0; attempt < 100; attempt++) { const table = (await database()).Tables.find(t => t.Name === name); if (table?.Records.length === count) return table; await page.waitForTimeout(100); }
-        throw new Error('Imported table was not saved: ' + name);
+        return saveReadyTable(page, database, name, count);
     }
     try {
         await button('External Data'); await page.screenshot({ path: screenshots + '/external-data-ribbon.png', fullPage: true });
@@ -113,7 +123,15 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         const choosingSqlite = page.waitForEvent('filechooser'); await button('Browse / Connect', true); await (await choosingSqlite).setFiles(sqlite);
         // Alphabetical SQLite table order begins with exact_values. Choose items through the native combo.
         await status(/records 1–1/);
-        await selectIndex('Tables', 1);
+        // Dismissing a chooser without accepting a new value must neither run
+        // another page request nor leave keyboard focus outside the source modal.
+        await focusNative(peer('combobox', 'Tables'), 'Tables');
+        await page.keyboard.press('Space'); await page.waitForTimeout(200);
+        assert.equal(await peer('combobox', 'Tables').getAttribute('aria-expanded'), 'true');
+        await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+        assert.equal(await peer('combobox', 'Tables').getAttribute('aria-expanded'), 'false');
+        await status(/records 1–1.*1 page reads \/ 0 cache hits/); checks++;
+        await selectIndex('Tables', 1, 0, true);
         await status(/records 1–200/); checks++;
         await button('Next ▶', true); await status(/records 201–400/);
         await button('◀ Previous', true); await status(/3 page reads \/ 1 cache hits/); checks++;
@@ -173,9 +191,13 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         assert.equal(mapped.Fields[1].Type, 'ShortText'); assert.equal(mapped.Records[2].Values.ExternalID, '3'); assert.equal(mapped.Records[2].Values.RowID, '3'); checks++;
         // Append the current imported datasheet to itself: omit the AutoNumber key by default.
         await button('External Data'); await button('Append Records');
-        await page.keyboard.press('Enter'); // The safe default is Cancel, not Append.
+        // Native ContentDialog initially focuses its first input. A ComboBox
+        // consumes Enter to open its list even when DefaultButton is Close.
+        // Reach the safe footer through real Tab traversal before testing Enter.
+        await focusNative(peer('button', 'Cancel'), 'Cancel');
+        await page.keyboard.press('Enter');
         await peer('combobox', 'Destination table').waitFor({ state: 'detached', timeout: 5000 });
-        assert.equal((await database()).Tables.find(table => table.Name === 'Mapped_Import_Test').Records.length, 3); checks++;
+        assert.equal((await saveTable('Mapped_Import_Test', 3)).Records.length, 3); checks++;
         await button('Append Records');
         await page.screenshot({ path: screenshots + '/append-records.png', fullPage: true });
         await button('Append records', true);
@@ -195,6 +217,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await writeFile(screenshots + '/external-source-checks.json', JSON.stringify({ checks, sqliteRows: 403, jsonRows: 3, workerInt64Exact: true, sourceWrites: false }, null, 2));
         return checks;
     } catch (error) {
+        console.error('External native focus:', await page.evaluate(() => ({ role: document.activeElement?.getAttribute('role'), name: document.activeElement?.getAttribute('aria-label'), expanded: document.activeElement?.getAttribute('aria-expanded') })));
         await writeFile(screenshots + '/external-source-accessibility.txt', await page.locator('body').ariaSnapshot()); throw error;
     }
 }

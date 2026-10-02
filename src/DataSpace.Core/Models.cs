@@ -21,6 +21,7 @@ public sealed class DatabaseDocument
 
 public sealed class TableDefinition
 {
+    public DatasheetLayout Datasheet { get; set; } = new();
     public string Name { get; set; } = "Table1";
     public string Description { get; set; } = "";
     public List<FieldDefinition> Fields { get; set; } = [];
@@ -100,6 +101,11 @@ public sealed class LayoutControl
     public double Width { get; set; } = 280;
     public double Height { get; set; } = 32;
     public double FontSize { get; set; } = 14;
+    /// <summary>-1 retains creation order for documents saved before explicit tab ordering.</summary>
+    public int TabIndex { get; set; } = -1;
+    public bool TabStop { get; set; } = true;
+    /// <summary>All members are scalar values or immutable strings.</summary>
+    public LayoutControl Copy() => (LayoutControl)MemberwiseClone();
 }
 
 public sealed class FormDefinition

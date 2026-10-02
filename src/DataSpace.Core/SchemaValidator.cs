@@ -43,6 +43,7 @@ public static class SchemaValidator
             var source = document.Table(form.Source);
             if (form.Controls is null || form.Controls.Count > 512 || !Finite(form.Width, 100, 10000) || !Finite(form.Height, 100, 10000))
                 throw new DataSpaceException("Invalid form dimensions or controls.");
+            FormTabOrder.Validate(form);
             foreach (var control in form.Controls)
             {
                 if (!Enum.IsDefined(control.Kind) || !Finite(control.X, 0, 10000) || !Finite(control.Y, 0, 10000) ||
@@ -64,6 +65,8 @@ public static class SchemaValidator
 
     public static void ValidateTable(TableDefinition table)
     {
+        if (table.Datasheet is null) throw new DataSpaceException("Datasheet layout must not be null.");
+        table.Datasheet.Validate();
         if (table.Fields is null || table.Records is null || table.Indexes is null || table.Fields.Count is < 1 or > 256 || table.Records.Count > 1000000)
             throw new DataSpaceException("Tables require 1–256 fields and at most 1,000,000 records.");
         UniqueNames(table.Fields.Select(f => f.Name), "field");

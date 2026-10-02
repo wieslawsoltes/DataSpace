@@ -1,7 +1,7 @@
 namespace DataSpace.Controls;
 
 /// <summary>Bound record form and drag/resize form designer with a detached property sheet.</summary>
-public sealed class FormEditorControl : UserControl, IDatabaseEditor
+public sealed partial class FormEditorControl : UserControl, IDatabaseEditor
 {
     private readonly DatabaseWorkspace _workspace;
     private FormDefinition _form;
@@ -35,7 +35,7 @@ public sealed class FormEditorControl : UserControl, IDatabaseEditor
     private static FormDefinition Copy(FormDefinition form) => new()
     {
         Name = form.Name, Source = form.Source, Title = form.Title, Width = form.Width, Height = form.Height,
-        Controls = form.Controls.Select(c => new LayoutControl { Id = c.Id, Kind = c.Kind, Field = c.Field, Caption = c.Caption, X = c.X, Y = c.Y, Width = c.Width, Height = c.Height, FontSize = c.FontSize }).ToList()
+        Controls = form.Controls.Select(c => c.Copy()).ToList()
     };
     private void BuildRecordHost()
     {
@@ -74,6 +74,7 @@ public sealed class FormEditorControl : UserControl, IDatabaseEditor
         {
             var empty = OfficeVisuals.Text("No records. Choose Home > New to add a record.", 14, "666666"); Canvas.SetLeft(empty, 35); Canvas.SetTop(empty, 100); canvas.Children.Add(empty); _recordHost.Content = canvas; return;
         }
+        var tabOrder = FormTabOrder.Ordered(_form).Select((control, index) => (control.Id, index)).ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
         foreach (var layout in _form.Controls)
         {
             FrameworkElement element;
@@ -91,6 +92,9 @@ public sealed class FormEditorControl : UserControl, IDatabaseEditor
                     var input = OfficeVisuals.Input(record[field.Name] ?? ""); input.IsReadOnly = field.Type == FieldType.AutoNumber; input.FontSize = layout.FontSize;
                     input.TextChanged += (_, _) => { _values[field.Name] = input.Text; HasPendingChanges = true; }; element = input;
                 }
+                var inputControl = (Control)element;
+                inputControl.TabIndex = tabOrder[layout.Id]; inputControl.IsTabStop = layout.TabStop;
+                AutomationProperties.SetAutomationId(element, "FormControl_" + layout.Id);
                 AutomationProperties.SetName(element, layout.Caption);
             }
             else element = OfficeVisuals.Text(layout.Caption, layout.FontSize, bold: layout.Kind == LayoutControlKind.Heading);
@@ -109,6 +113,8 @@ public sealed class FormEditorControl : UserControl, IDatabaseEditor
             OfficeVisuals.Button("Delete", DeleteSelected));
         toolbar.Margin = new(8); OfficeVisuals.Add(_root, EditorVisuals.Scroll(toolbar), columnSpan: 2);
         _surface.Width = _form.Width; _surface.Height = _form.Height; _surface.IsTabStop = true;
+        AutomationProperties.SetName(_surface, "Form design canvas");
+        AutomationProperties.SetAutomationId(_surface, "FormDesignCanvas");
         _surface.Painter = (canvas, width, height) => _renderer.Draw(canvas, width, height, _form, _selected?.Id, _zoom);
         _surface.PointerPressed += (_, e) =>
         {
@@ -173,6 +179,23 @@ public sealed class FormEditorControl : UserControl, IDatabaseEditor
         Number("Left", control.X, 0, 10000, value => control.X = value); Number("Top", control.Y, 0, 10000, value => control.Y = value);
         Number("Width", control.Width, 16, 10000, value => control.Width = value); Number("Height", control.Height, 16, 10000, value => control.Height = value);
         Number("Font Size", control.FontSize, 6, 120, value => control.FontSize = value);
+        if (FormTabOrder.IsInput(control))
+            _properties.Children.Add(EditorVisuals.Check("Tab Stop", control.TabStop, value => { control.TabStop = value; HasPendingChanges = true; }));
+    }
+    public void ExecuteRibbon(string command)
+    {
+        if (!_design) return;
+        switch (command)
+        {
+            case "formLabel": Add(LayoutControlKind.Label, null); break;
+            case "formHeading": Add(LayoutControlKind.Heading, null); break;
+            case "formDelete": DeleteSelected(); break;
+            case "propertySheet":
+                var show = _properties.Visibility == Visibility.Collapsed;
+                _properties.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+                _root.ColumnDefinitions[1].Width = new(show ? 285 : 0);
+                break;
+        }
     }
     public void Commit()
     {

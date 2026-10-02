@@ -7,19 +7,36 @@ public sealed partial class DatabaseWorkspaceView
     public Func<string, FieldDefinition[], Record[], CancellationToken, Task<byte[]>>? ExportSqliteTableAsync { get; set; }
     private async Task ExternalDataAsync(string provider)
     {
-        await using var editor = new ExternalDataControl(ImportTextAsync, OpenSqliteAsync, provider);
-        editor.NameAvailable = name => !Workspace.Document.Tables.Any(t => Names.Equal(t.Name, name));
-        editor.Width = Math.Max(660, Math.Min(1080, XamlRoot.Size.Width - 100)); editor.Height = Math.Max(320, Math.Min(500, XamlRoot.Size.Height - 300));
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "External Data", Content = editor, CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
-        dialog.Resources["ContentDialogMaxWidth"] = 1200d;
-        editor.ImportCompleted += () => dialog.Hide();
-        await dialog.ShowAsync();
-        if (editor.ImportedTable is { } table)
+        TableDefinition? imported;
+        await using (var editor = new ExternalDataControl(ImportTextAsync, OpenSqliteAsync, provider))
+        {
+            editor.NameAvailable = name => !Workspace.Document.Tables.Any(t => Names.Equal(t.Name, name));
+            editor.Width = Math.Max(660, Math.Min(1080, XamlRoot.Size.Width - 100));
+            editor.Height = Math.Max(320, Math.Min(500, XamlRoot.Size.Height - 300));
+            var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "External Data", Content = editor,
+                CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
+            dialog.Resources["ContentDialogMaxWidth"] = 1200d;
+            editor.ImportCompleted += () => dialog.Hide();
+            dialog.Closing += editor.OnSourceDialogClosing;
+            try { await dialog.ShowAsync(); imported = editor.ImportedTable; }
+            finally { dialog.Closing -= editor.OnSourceDialogClosing; dialog.Content = null; }
+        }
+        // Retire the popup's native inputs before opening and focusing its result.
+        // Disposing them after opening the table can restore focus to a dead peer
+        // and lose the user's next keyboard command (including Ctrl+S).
+        if (imported is { } table)
         {
             Workspace.Edit("Import external table", document => document.Tables.Add(table));
-            OpenObject(new(DatabaseObjectKind.Table, table.Name)); ShowStatus($"Imported {table.Records.Count:N0} records into {table.Name}. This is a local copy; save to retain it.");
+            OpenObject(new(DatabaseObjectKind.Table, table.Name));
+            ShowStatus($"Imported {table.Records.Count:N0} records into {table.Name}. This is a local copy; save to retain it.");
         }
+        var activeSheet = _sheet;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (IsLoaded && !_busy && ReferenceEquals(activeSheet, _sheet)) activeSheet?.FocusGrid();
+        });
     }
+
     private async Task ExportSourceAsync(bool sqlite)
     {
         if (_sheet is null || _active?.Kind != DatabaseObjectKind.Table) throw new DataSpaceException("Open a local table datasheet to export.");

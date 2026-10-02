@@ -88,6 +88,29 @@ public sealed class TableDesignerControl : UserControl, IDatabaseEditor
         _properties.Children.Add(EditorVisuals.Check("Indexed (No Duplicates)", field.Unique, value => { if (field.Unique != value) { field.Unique = value; HasPendingChanges = true; } }));
         _properties.Children.Add(EditorVisuals.Check("Allow Zero Length", field.AllowZeroLength, value => { if (field.AllowZeroLength != value) { field.AllowZeroLength = value; HasPendingChanges = true; } }));
     }
+    public void ToggleProperties()
+    {
+        if (Content is not Grid root) return;
+        var show = _properties.Visibility == Visibility.Collapsed;
+        _properties.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        root.ColumnDefinitions[1].Width = new(show ? 300 : 0);
+    }
+    public async Task ExecuteRibbonAsync(string command)
+    {
+        switch (command)
+        {
+            case "fieldAdd": AddField(); break;
+            case "fieldDelete": DeleteField(); break;
+            case "fieldUp": Move(-1); break;
+            case "fieldDown": Move(1); break;
+            case "fieldIndexes": await EditIndexesAsync(); break;
+            case "fieldPrimaryKey":
+                if (_selected is null) return;
+                var enable = !_selected.Field.PrimaryKey;
+                foreach (var field in _draft.Fields) field.Field.PrimaryKey = enable && ReferenceEquals(field, _selected);
+                HasPendingChanges = true; BuildRows(); break;
+        }
+    }
     public void Commit()
     {
         if (!HasPendingChanges) return; _draft.Apply(_workspace);

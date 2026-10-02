@@ -55,16 +55,25 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
         _navigation.CollapseRequested += ToggleNavigation;
         _navigation.ObjectOpened += (item, design) => Try(() => OpenObject(item, design));
         _navigation.ObjectCommand += (item, command) => _ = GuardAsync(() => ObjectCommandAsync(item, command));
-        _tabs.Selected += item => Try(() => OpenObject(item)); _tabs.Closed += item => Try(() => CloseObject(item));
+        _tabs.Selected += item => Try(() => ActivateDocument(item)); _tabs.Closed += item => Try(() => CloseObject(item));
+        _tabs.CloseOthersRequested += item => Try(() => CloseDocumentsExcept(item));
+        _tabs.CloseAllRequested += () => Try(() => CloseDocumentsExcept(null));
+        _tabs.ViewRequested += (item, design) => Try(() => OpenObject(item, design));
+        AddNavigationSplitter();
         _navigator.Navigate += index => _sheet?.SelectCell(index, _sheet.ViewState.SelectedColumn);
         _navigator.NewRecord += () => Execute("newRecord");
         _navigator.SearchChanged += text => { _pendingSearch = text; _searchTimer.Stop(); _searchTimer.Start(); };
         _searchTimer.Tick += (_, _) => { _searchTimer.Stop(); Try(() => { CommitActive(); _search = _pendingSearch; RefreshTable(); }); };
         KeyDown += (_, e) =>
         {
+            if (_busy) return; // Do not route document/window shortcuts through an open modal.
+            if (e.Key == VirtualKey.F11) { ToggleNavigation(); e.Handled = true; return; }
+            if (e.Key == VirtualKey.F4 && !OfficeVisuals.ControlDown) { Execute("propertySheet"); e.Handled = true; return; }
+            if (OfficeVisuals.ControlDown && e.Key == VirtualKey.Tab) { Try(() => CycleDocument(OfficeVisuals.ShiftDown)); e.Handled = true; return; }
+            if (OfficeVisuals.ControlDown && e.Key is VirtualKey.W or VirtualKey.F4) { if (_active is not null) Try(() => CloseObject(_active)); e.Handled = true; return; }
             if (e.Key == VirtualKey.F6) { _navigation.FocusSearch(); e.Handled = true; return; }
             if (!OfficeVisuals.ControlDown) return;
-            var command = e.Key switch { VirtualKey.S => "save", VirtualKey.Z => "undo", VirtualKey.Y => "redo", VirtualKey.F => "find", VirtualKey.O => "open", VirtualKey.F1 => "collapseRibbon", _ => null };
+            var command = e.Key switch { VirtualKey.S => "save", VirtualKey.Z => "undo", VirtualKey.Y => "redo", VirtualKey.F => "find", VirtualKey.H => "replace", VirtualKey.O => "open", VirtualKey.F1 => "collapseRibbon", _ => null };
             if (command is not null) { Execute(command); e.Handled = true; }
         };
         Workspace.Changed += OnChanged; UpdateChrome();
@@ -80,7 +89,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     {
         var collapse = _navigation.Visibility == Visibility.Visible;
         _navigation.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible; _expandNavigation.Visibility = collapse ? Visibility.Visible : Visibility.Collapsed;
-        _body.ColumnDefinitions[0].Width = new(collapse ? 28 : 220);
+        _body.ColumnDefinitions[0].Width = new(collapse ? 28 : _navigationWidth);
     }
     private void OnChanged(object? sender, EventArgs e)
     {
@@ -91,6 +100,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     {
         _title.Text = Workspace.Document.Name + " : Database — DataSpace" + (StorageIsDirty?.Invoke() == true ? " *" : "");
         _navigation.SetObjects(Workspace.Document); _navigation.Select(_active); _tabs.SetDocuments(_documents, _active?.Key);
+        UpdateContextRibbon();
         _ribbon.SetCommandEnabled("undo", Workspace.CanUndo); _ribbon.SetCommandEnabled("redo", Workspace.CanRedo); _ribbon.SetCommandEnabled("exportPdf", _editor is ReportPreviewControl);
     }
     public void ShowStatus(string message) { _status.Text = message; UpdateChrome(); }
@@ -121,7 +131,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
             DatabaseObjectKind.Macro => new MacroDesignerControl(Workspace, item.Name),
             _ => throw new DataSpaceException("Unknown database object.")
         };
-        DisposeActive(); _active = item; _design = design; _editor = view as IDatabaseEditor; _sheet = view as DatasheetControl;
+        DisposeActive(); _active = item; _design = design; _documentModes[item.Key] = design; _editor = view as IDatabaseEditor; _sheet = view as DatasheetControl;
         _filter = ""; _search = ""; _pendingSearch = ""; _sortField = null; _descending = false;
         if (view is QueryEditorControl query) { query.ConfirmActionAsync = ConfirmAsync; query.Error += ShowError; }
         if (view is FormEditorControl form) form.Error += ShowError;
@@ -146,7 +156,8 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
         };
         sheet.NewRecordRequested += () => Execute("newRecord"); sheet.DeleteRecordsRequested += ids => _ = GuardAsync(() => DeleteRecordsAsync(ids));
         sheet.SortRequested += (field, descending) => Try(() => { CommitActive(); _sortField = field; _descending = descending; RefreshTable(); });
-        sheet.ColumnWidthChanged += (field, width) => Try(() => Workspace.Edit("Resize column", document => document.Table(tableName).Field(field).Width = width));
+        sheet.ColumnWidthChanged += (field, width) => Try(() => Workspace.ConfigureDatasheet(tableName, Workspace.Document.Table(tableName).Datasheet, field, width));
+        sheet.LayoutCommand += command => Execute(command);
         sheet.SelectionChanged += () => _navigator.Update(sheet.ViewState.SelectedRow, sheet.Records.Count, _filter.Length > 0 || _search.Length > 0);
         sheet.Error += ShowError; return sheet;
     }
@@ -155,7 +166,9 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
         if (_sheet is null || _active?.Kind != DatabaseObjectKind.Table) return;
         var result = TableView.Open(Workspace.Document, _active.Name, _filter, _sortField, _descending, _search);
         _sheet.ViewState.SortField = _sortField; _sheet.ViewState.SortDescending = _descending;
-        _sheet.SetData(result.Fields, result); _navigator.Update(_sheet.ViewState.SelectedRow, result.Count, _filter.Length > 0 || _search.Length > 0);
+        var layout = Workspace.Document.Table(_active.Name).Datasheet;
+        var visible = layout.VisibleFields(result.Fields); _sheet.ApplyLayout(layout, visible);
+        _sheet.SetData(visible, result); _navigator.Update(_sheet.ViewState.SelectedRow, result.Count, _filter.Length > 0 || _search.Length > 0);
     }
     private void DisposeActive() { _searchTimer.Stop(); if (_content.Content is IDisposable disposable) disposable.Dispose(); _content.Content = null; _sheet = null; _editor = null; }
     private void EmptyView()
@@ -167,7 +180,7 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     {
         if (_active?.Key == item.Key) { CommitActive(); DisposeActive(); _active = null; }
         _documents.RemoveAll(d => d.Key == item.Key);
-        if (_active is null) { if (_documents.LastOrDefault() is { } next) OpenObject(next); else EmptyView(); } UpdateChrome();
+        if (_active is null) { if (_documents.LastOrDefault() is { } next) ActivateDocument(next); else EmptyView(); } UpdateChrome();
     }
     private void ReopenActive()
     {
@@ -184,8 +197,8 @@ public sealed partial class DatabaseWorkspaceView : UserControl, IDisposable
     private string SourceTable() => _active?.Kind == DatabaseObjectKind.Table ? _active.Name : _editor is FormEditorControl form ? form.Source : Workspace.Document.Tables.FirstOrDefault()?.Name ?? throw new DataSpaceException("Create a table first.");
     public void ReplaceDocument(DatabaseDocument document)
     {
-        var validated = DocumentCodec.Clone(document); DisposeActive(); _active = null; _documents.Clear(); Workspace.Replace(validated);
+        var validated = DocumentCodec.Clone(document); DisposeActive(); _active = null; _documents.Clear(); _documentModes.Clear(); Workspace.Replace(validated);
         if (Workspace.Document.Tables.FirstOrDefault() is { } first) OpenObject(new(DatabaseObjectKind.Table, first.Name)); else EmptyView(); UpdateChrome();
     }
-    public void Dispose() { _searchTimer.Stop(); Workspace.Changed -= OnChanged; DisposeActive(); }
+    public void Dispose() { _searchTimer.Stop(); Workspace.Changed -= OnChanged; _navigation.Dispose(); DisposeActive(); }
 }

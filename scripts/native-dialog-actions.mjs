@@ -4,7 +4,17 @@
  * focus. No click/evaluate-to-invoke fallback is allowed: unreachable commands
  * must fail the browser gate, especially for destructive confirmations.
  */
-export async function activateDialogButton(page, target, name, options = {}) {
+export function activateDialogButton(page, target, name, options = {}) {
+    // Space activates the native button rather than the dialog's Enter default.
+    return activateNativeItem(page, target, name, options, ['Tab', 'Shift+Tab'], 'Space');
+}
+
+/** Activate an open native menu using arrow-key focus, not a DOM-proxy focus call. */
+export function activateMenuItem(page, target, name, options = {}) {
+    return activateNativeItem(page, target, name, options, ['ArrowDown', 'ArrowUp'], 'Enter');
+}
+
+async function activateNativeItem(page, target, name, options, directions, activation) {
     const steps = options.stepsPerDirection ?? 32;
     const settle = options.settleMilliseconds ?? 100;
     if (!Number.isInteger(steps) || steps < 1 || steps > 100 ||
@@ -14,9 +24,9 @@ export async function activateDialogButton(page, target, name, options = {}) {
     await target.waitFor({ state: 'attached', timeout: 5000 });
     if (!await target.isEnabled()) throw new Error(name + ' is disabled.');
     const trace = [];
-    // Reverse traversal also covers footer controls preceding the safe default
-    // Cancel button. Neither traversal changes the default action to Continue.
-    for (const key of ['Tab', 'Shift+Tab']) {
+    // Traverse both ways: menus can stop at an edge, and dialog footer controls
+    // can precede Cancel. Never trust an initial accessibility-proxy focus alone.
+    for (const key of directions) {
         for (let i = 0; i < steps; i++) {
             await page.keyboard.press(key);
             await page.waitForTimeout(settle);
@@ -32,9 +42,9 @@ export async function activateDialogButton(page, target, name, options = {}) {
             });
             trace.push({ key, ...focus });
             if (!focus.focused) continue;
-            // Space activates the focused button without invoking the dialog's
-            // Enter default (Cancel for destructive-action confirmations).
-            await page.keyboard.press('Space');
+            // Only real keyboard focus admits activation. No DOM click or
+            // application-command invocation is used as a fallback.
+            await page.keyboard.press(activation);
             return;
         }
     }
