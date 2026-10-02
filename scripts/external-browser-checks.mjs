@@ -192,9 +192,13 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         assert.equal(mapped.Fields[1].Type, 'ShortText'); assert.equal(mapped.Records[2].Values.ExternalID, '3'); assert.equal(mapped.Records[2].Values.RowID, '3'); checks++;
         // Append the current imported datasheet to itself: omit the AutoNumber key by default.
         await button('External Data'); await button('Append Records');
-        await page.keyboard.press('Enter'); // The safe default is Cancel, not Append.
+        // Native ContentDialog initially focuses its first input. A ComboBox
+        // consumes Enter to open its list even when DefaultButton is Close.
+        // Reach the safe footer through real Tab traversal before testing Enter.
+        await focusNative(peer('button', 'Cancel'), 'Cancel');
+        await page.keyboard.press('Enter');
         await peer('combobox', 'Destination table').waitFor({ state: 'detached', timeout: 5000 });
-        assert.equal((await database()).Tables.find(table => table.Name === 'Mapped_Import_Test').Records.length, 3); checks++;
+        assert.equal((await saveTable('Mapped_Import_Test', 3)).Records.length, 3); checks++;
         await button('Append Records');
         await page.screenshot({ path: screenshots + '/append-records.png', fullPage: true });
         await button('Append records', true);
