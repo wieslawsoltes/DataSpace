@@ -5,6 +5,7 @@ public sealed partial class ExternalDataControl
     private void OnCommittedSelection(ComboBox selector, Action selected)
     {
         var pending = false;
+        var committed = selector.SelectedItem;
         var generation = 0;
         void QueueSelection()
         {
@@ -14,12 +15,20 @@ public sealed partial class ExternalDataControl
             {
                 if (generation != expected || _disposed || _changing || _busy || selector.IsDropDownOpen) return;
                 pending = false;
+                var next = selector.SelectedItem;
+                if (Equals(next, committed)) return; // Escape can restore the original choice.
+                committed = next;
                 selected();
             });
         }
         selector.SelectionChanged += (_, _) =>
         {
-            if (_disposed || _changing || _busy) return;
+            if (_disposed || _changing || _busy)
+            {
+                // A reconnect/catalog reset invalidates previously queued input.
+                generation++; pending = false; committed = selector.SelectedItem;
+                return;
+            }
             pending = true;
             QueueSelection();
         };

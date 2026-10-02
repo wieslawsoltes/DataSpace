@@ -113,6 +113,12 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         const choosingSqlite = page.waitForEvent('filechooser'); await button('Browse / Connect', true); await (await choosingSqlite).setFiles(sqlite);
         // Alphabetical SQLite table order begins with exact_values. Choose items through the native combo.
         await status(/records 1–1/);
+        // Dismissing a chooser without accepting a new value must neither run
+        // another page request nor leave keyboard focus outside the source modal.
+        await focusNative(peer('combobox', 'Tables'), 'Tables');
+        await page.keyboard.press('Space'); await page.waitForTimeout(200);
+        await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+        await status(/records 1–1.*1 page reads \/ 0 cache hits/); checks++;
         await selectIndex('Tables', 1);
         await status(/records 1–200/); checks++;
         await button('Next ▶', true); await status(/records 201–400/);

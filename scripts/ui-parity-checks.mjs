@@ -89,11 +89,13 @@ export async function uiParityChecks(page, baseURL, screenshots, ready) {
         await page.screenshot({ path: screenshots + '/table-design-ribbon.png', fullPage: true });
         await button('Datasheet View'); checks++;
         await button('Help'); await button('Navigation Pane'); await button('Navigation Pane'); checks++;
+        // Both the opener and the item use real native keyboard focus; focusing
+        // an accessibility proxy after a closed popup is not native focus.
         const objectButtons = await page.getByRole('button', { name: 'Mapped_Import_Test', exact: true }).count();
-        await button('All Access Objects ▾'); await activateMenuItem(page, peer('menuitem', 'Queries'), 'Queries');
+        await activateDialogButton(page, peer('button', 'All Access Objects ▾'), 'Navigation categories', { stepsPerDirection: 64 }); await activateMenuItem(page, peer('menuitem', 'Queries'), 'Queries');
         await peer('button', 'Queries ▾').waitFor({ state: 'attached', timeout: 5000 });
         assert.equal(await page.getByRole('button', { name: 'Mapped_Import_Test', exact: true }).count(), objectButtons - 1); checks++;
-        await button('Queries ▾'); await activateMenuItem(page, peer('menuitem', 'All Access Objects'), 'All Access Objects');
+        await activateDialogButton(page, peer('button', 'Queries ▾'), 'Navigation categories', { stepsPerDirection: 64 }); await activateMenuItem(page, peer('menuitem', 'All Access Objects'), 'All Access Objects');
         await peer('button', 'All Access Objects ▾').waitFor({ state: 'attached', timeout: 5000 });
         await button('JSON_Import_Test'); await button('Mapped_Import_Test');
         await page.keyboard.press('Control+Tab'); await page.keyboard.press('Control+Shift+Tab'); checks++;

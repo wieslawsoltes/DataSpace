@@ -64,7 +64,19 @@ public sealed class NavigationPane : UserControl, IDisposable
     private void ShowNavigationMenu()
     {
         var menu = new MenuFlyout();
-        void Item(string name, Action action) { var item = new MenuFlyoutItem { Text = name }; item.Click += (_, _) => action(); menu.Items.Add(item); }
+        void Apply(Action action)
+        {
+            // Rebuilding the object list while its native menu still owns focus
+            // can leave a stale popup peer as the target of the next key gesture.
+            menu.Hide();
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!IsLoaded) return;
+                action();
+                _category.Focus(FocusState.Programmatic);
+            });
+        }
+        void Item(string name, Action action) { var item = new MenuFlyoutItem { Text = name }; item.Click += (_, _) => Apply(action); menu.Items.Add(item); }
         void Category(DatabaseObjectKind? kind, string name) => Item(name, () => { _kind = kind; _category.Content = name + " ▾"; AutomationProperties.SetName(_category, name + " ▾"); Build(); });
         Category(null, "All Access Objects");
         foreach (var kind in new[] { DatabaseObjectKind.Table, DatabaseObjectKind.Query, DatabaseObjectKind.Form, DatabaseObjectKind.Report, DatabaseObjectKind.Macro })
@@ -74,9 +86,9 @@ public sealed class NavigationPane : UserControl, IDisposable
         Item("Expand All Groups", () => { _collapsed.Clear(); Build(); });
         Item("Collapse All Groups", () => { foreach (var kind in Enum.GetValues<DatabaseObjectKind>()) _collapsed.Add(kind); Build(); });
         var hidden = new ToggleMenuFlyoutItem { Text = "Show Hidden Objects", IsChecked = _showHidden };
-        hidden.Click += (_, _) => { _showHidden = hidden.IsChecked; Build(); }; menu.Items.Add(hidden);
+        hidden.Click += (_, _) => { var show = hidden.IsChecked; Apply(() => { _showHidden = show; Build(); }); }; menu.Items.Add(hidden);
         var single = new ToggleMenuFlyoutItem { Text = "Single-click to open", IsChecked = OpenOnSingleClick };
-        single.Click += (_, _) => OpenOnSingleClick = single.IsChecked; menu.Items.Add(single);
+        single.Click += (_, _) => { var open = single.IsChecked; Apply(() => OpenOnSingleClick = open); }; menu.Items.Add(single);
         menu.ShowAt(_category);
     }
     public void Dispose() { _searchTimer.Stop(); _items.Children.Clear(); _buttons.Clear(); }
