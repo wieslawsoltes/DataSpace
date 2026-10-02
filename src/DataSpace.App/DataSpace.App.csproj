@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="../DataSpace.Controls/DataSpace.Controls.csproj" />
     <Content Include="browser-storage.js" UnoDeploy="Root" />
+    <Content Include="browser-input.js" UnoDeploy="Root" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-desktop'">
     <ProjectReference Include="../DataSpace.DataSources.Relational/DataSpace.DataSources.Relational.csproj" />

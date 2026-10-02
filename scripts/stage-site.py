@@ -14,7 +14,7 @@ if output.exists():
     shutil.rmtree(output)
 shutil.copytree(source, output)
 shutil.copy2('src/DataSpace.App/browser-storage.js', output / 'browser-storage.js')
-for name in ('browser-sqlite.js', 'sqlite-worker.js'):
+for name in ('browser-sqlite.js', 'sqlite-worker.js', 'browser-input.js'):
     shutil.copy2(Path('src/DataSpace.App') / name, output / name)
 package = Path('scripts/node_modules/sql.js')
 if not (package / 'dist/sql-wasm.wasm').is_file():

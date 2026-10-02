@@ -12,8 +12,12 @@ internal static partial class PlatformServices
         using var document = JSHost.GlobalThis.GetPropertyAsJSObject("document");
         var baseUri = document.GetPropertyAsString("baseURI") ?? throw new DataSpaceException("The browser document has no base URI.");
         await JSHost.ImportAsync("DataSpaceBrowser", new Uri(new Uri(baseUri), "browser-storage.js").AbsoluteUri);
+        await JSHost.ImportAsync("DataSpaceInput", new Uri(new Uri(baseUri), "browser-input.js").AbsoluteUri);
+        InstallInputAdapter();
         _initialized = true;
     }
+    [JSImport("install", "DataSpaceInput")]
+    private static partial void InstallInputAdapter();
     public static IWorkspaceStore CreateStore() => new BrowserWorkspaceStore();
     [JSImport("readWorkspace", "DataSpaceBrowser")]
     internal static partial Task<string> ReadWorkspaceAsync();

@@ -118,3 +118,77 @@ test('disabled menu item cannot be activated', async () => {
     await assert.rejects(activateMenuItem(f.page, f.target, 'Freeze Fields'), /disabled/);
     assert.deepEqual(f.commands, []);
 });
+
+
+// Platform-adapter unit tests simulate event propagation. Actual Uno behavior is
+// separately gated by browser-smoke.mjs against the published WebAssembly app.
+import { installKeyboardRouter } from '../src/DataSpace.App/browser-input.js';
+
+function routingFixture({ role = 'combobox', outside = false, input = false } = {}) {
+    const listeners = new Map();
+    const root = { contains: element => element === target && !outside };
+    const target = {
+        id: 'uno-semantics-42', isContentEditable: false,
+        getAttribute: name => name === 'role' ? role : null,
+        closest: query => query.includes('input') ? (input ? target : null) : target
+    };
+    const document = {
+        getElementById: name => name === 'uno-semantics-root' ? root : null,
+        addEventListener: (type, callback, capture) => { assert.equal(capture, true); listeners.set(type, callback); },
+        removeEventListener: (type, callback, capture) => { assert.equal(capture, true); if (listeners.get(type) === callback) listeners.delete(type); }
+    };
+    const native = [], semantic = [];
+    const dispatch = event => native.push(event);
+    function send(key, options = {}) {
+        const event = {
+            type: 'keydown', key, code: key, target, altKey: false, ...options,
+            prevented: false, stopped: false,
+            preventDefault() { this.prevented = true; },
+            stopImmediatePropagation() { this.stopped = true; }
+        };
+        listeners.get('keydown')?.(event);
+        if (!event.stopped) { semantic.push(event); dispatch(event); }
+        return event;
+    }
+    return { document, target, native, semantic, dispatch, send, listeners };
+}
+
+for (const [role, key, altKey] of [
+    ['combobox', 'Enter', false], ['combobox', ' ', false], ['combobox', 'Escape', false], ['combobox', 'ArrowDown', true],
+    ['option', 'Enter', false], ['option', ' ', false],
+    ['menuitem', 'Enter', false], ['menuitem', ' ', false], ['menuitem', 'Escape', false],
+    ['menuitem', 'ArrowDown', false], ['menuitem', 'ArrowUp', false], ['menuitem', 'ArrowRight', false]
+]) test(`routes ${role} ${JSON.stringify(key)} once through native input`, () => {
+    const f = routingFixture({ role });
+    const dispose = installKeyboardRouter(f.document, f.dispatch);
+    const event = f.send(key, { altKey });
+    assert.deepEqual(f.native, [event]); assert.deepEqual(f.semantic, []);
+    assert.equal(event.prevented, true); assert.equal(event.stopped, true);
+    assert.equal(f.listeners.has('keyup'), false, 'Native keyup and physical key state remain unmodified.');
+    dispose();
+});
+
+for (const [key, fixtureOptions, eventOptions] of [
+    ['Tab', {}, {}], ['a', {}, {}], ['ArrowDown', {}, {}],
+    ['Enter', { outside: true }, {}], [' ', { input: true }, {}],
+    ['Enter', {}, { isComposing: true }], ['Enter', {}, { keyCode: 229 }],
+    ['Enter', { role: 'textbox' }, {}]
+]) test(`leaves unrelated/text/IME event unchanged: ${JSON.stringify([key, fixtureOptions, eventOptions])}`, () => {
+    const f = routingFixture(fixtureOptions); installKeyboardRouter(f.document, f.dispatch);
+    const event = f.send(key, eventOptions);
+    assert.equal(event.stopped, false); assert.equal(event.prevented, false);
+    assert.deepEqual(f.semantic, [event]); assert.deepEqual(f.native, [event]);
+});
+
+test('keyboard router installs once and can be disposed and reinstalled', () => {
+    const f = routingFixture(); const dispose = installKeyboardRouter(f.document, f.dispatch);
+    assert.equal(installKeyboardRouter(f.document, f.dispatch), dispose);
+    dispose(); dispose(); assert.equal(f.listeners.size, 0);
+    const fresh = installKeyboardRouter(f.document, f.dispatch); assert.notEqual(fresh, dispose);
+    const event = f.send('Enter'); assert.deepEqual(f.native, [event]); fresh();
+});
+
+test('keyboard router rejects incomplete host contracts', () => {
+    assert.throws(() => installKeyboardRouter(null, () => {}), TypeError);
+    assert.throws(() => installKeyboardRouter(routingFixture().document, null), TypeError);
+});
