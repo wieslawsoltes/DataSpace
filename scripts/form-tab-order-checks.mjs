@@ -17,6 +17,13 @@ export async function formTabOrderChecks(page, screenshots, database, saved, com
         }
         throw new Error('Form control is not reachable using native keyboard focus.');
     }
+    async function savedForm(predicate) {
+        await page.getByRole('button', { name: 'Apply Tab Order', exact: true }).waitFor({ state: 'detached', timeout: 10000 });
+        const canvas = page.locator('[xamlautomationid="FormDesignCanvas"]');
+        await canvas.waitFor({ state: 'attached', timeout: 10000 });
+        await focus(canvas);
+        return saved(predicate);
+    }
     await command('formTabOrder'); await button('Auto Order'); await button('Cancel');
     assert.deepEqual((await database()).Forms.find(f => f.Name === name).Controls, form.Controls); checks++;
     await command('formTabOrder'); await button('Move Down');
@@ -24,14 +31,14 @@ export async function formTabOrderChecks(page, screenshots, database, saved, com
     await focus(stop); await page.keyboard.press('Space');
     await page.screenshot({ path: screenshots + '/form-tab-order.png', fullPage: true });
     await button('Apply Tab Order');
-    const updated = (await saved(db => db.Forms.find(f => f.Name === name).Controls.find(c => c.Id === inputs[0].Id).TabIndex === 1)).Forms.find(f => f.Name === name);
+    const updated = (await savedForm(db => db.Forms.find(f => f.Name === name).Controls.find(c => c.Id === inputs[0].Id).TabIndex === 1)).Forms.find(f => f.Name === name);
     assert.equal(updated.Controls.find(c => c.Id === inputs[0].Id).TabStop, false);
     assert.equal(updated.Controls.find(c => c.Id === inputs[1].Id).TabIndex, 0);
     assert.deepEqual(updated.Controls.map(c => c.Id), form.Controls.map(c => c.Id)); checks++;
     await page.keyboard.press('Control+z');
-    await saved(db => db.Forms.find(f => f.Name === name).Controls.find(c => c.Id === inputs[0].Id).TabIndex === -1); checks++;
+    await savedForm(db => db.Forms.find(f => f.Name === name).Controls.find(c => c.Id === inputs[0].Id).TabIndex === -1); checks++;
     await page.keyboard.press('Control+y');
-    await saved(db => db.Forms.find(f => f.Name === name).Controls.find(c => c.Id === inputs[0].Id).TabStop === false); checks++;
+    await savedForm(db => db.Forms.find(f => f.Name === name).Controls.find(c => c.Id === inputs[0].Id).TabStop === false); checks++;
     await command('datasheetView');
     const second = page.getByRole(inputs[1].Kind === 'CheckBox' ? 'checkbox' : 'textbox', { name: inputs[1].Caption, exact: true }).last();
     const third = page.getByRole(inputs[2].Kind === 'CheckBox' ? 'checkbox' : 'textbox', { name: inputs[2].Caption, exact: true }).last();
@@ -44,7 +51,7 @@ export async function formTabOrderChecks(page, screenshots, database, saved, com
     await page.getByRole('button', { name: 'Form Design', exact: true }).press('Enter');
     await command('formTabOrder'); await button('Auto Order'); await button('Apply Tab Order');
     const ordered = [...inputs].sort((a, b) => a.Y - b.Y || a.X - b.X);
-    await saved(db => db.Forms.find(f => f.Name === name).Controls.find(c => c.Id === ordered[0].Id).TabIndex === 0); checks++;
+    await savedForm(db => db.Forms.find(f => f.Name === name).Controls.find(c => c.Id === ordered[0].Id).TabIndex === 0); checks++;
     await writeFile(screenshots + '/form-tab-order-checks.json', JSON.stringify({ checks, nativeTabAndShiftTab: true, keepsDrawOrder: true }, null, 2));
     return checks;
 }

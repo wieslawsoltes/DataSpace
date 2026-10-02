@@ -113,6 +113,8 @@ public sealed partial class FormEditorControl : UserControl, IDatabaseEditor
             OfficeVisuals.Button("Delete", DeleteSelected));
         toolbar.Margin = new(8); OfficeVisuals.Add(_root, EditorVisuals.Scroll(toolbar), columnSpan: 2);
         _surface.Width = _form.Width; _surface.Height = _form.Height; _surface.IsTabStop = true;
+        AutomationProperties.SetName(_surface, "Form design canvas");
+        AutomationProperties.SetAutomationId(_surface, "FormDesignCanvas");
         _surface.Painter = (canvas, width, height) => _renderer.Draw(canvas, width, height, _form, _selected?.Id, _zoom);
         _surface.PointerPressed += (_, e) =>
         {
