@@ -71,9 +71,10 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
     }
     async function selectIndex(name, index, currentIndex = 0, verifyHeldEnter = false) {
         const combo = peer('combobox', name); await focusNative(combo, name);
-        // Open the native popup before accepting an item. Enter on a collapsed
-        // selector can activate the parent dialog's default Close button.
-        await page.keyboard.press('Space'); await page.waitForTimeout(200);
+        // Alt+Down explicitly opens a native selector even during type-ahead.
+        // Space can be consumed as search text; a second Enter must not activate
+        // the containing dialog's default action after a failed open.
+        await page.keyboard.press('Alt+ArrowDown'); await page.waitForTimeout(200);
         assert.equal(await combo.getAttribute('aria-expanded'), 'true', name + ' popup must actually open.');
         // Home does not move the focused native popup item on every Uno backend.
         // Navigate from the known selected item rather than assuming it reset to zero.
