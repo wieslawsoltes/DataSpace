@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { activateDialogButton } from './native-dialog-actions.mjs';
+import { saveReadyTable } from './workspace-readiness.mjs';
 
 /** Real local SQLite WASM worker, HTTP gateway and native Uno source workflows. */
 export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
@@ -105,9 +106,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         }, baseURL);
     }
     async function saveTable(name, count) {
-        await page.keyboard.press('Control+s');
-        for (let attempt = 0; attempt < 100; attempt++) { const table = (await database()).Tables.find(t => t.Name === name); if (table?.Records.length === count) return table; await page.waitForTimeout(100); }
-        throw new Error('Imported table was not saved: ' + name);
+        return saveReadyTable(page, database, name, count);
     }
     try {
         await button('External Data'); await page.screenshot({ path: screenshots + '/external-data-ribbon.png', fullPage: true });
