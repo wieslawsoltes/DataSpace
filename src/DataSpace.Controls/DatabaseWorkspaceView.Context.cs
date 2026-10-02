@@ -77,7 +77,10 @@ public sealed partial class DatabaseWorkspaceView
                 case "queryUnmatched": await query.ShowFindBuilderAsync(FindQueryKind.Unmatched); break;
             }
         }
-        else if (_editor is FormEditorControl form) form.ExecuteRibbon(id);
+        else if (_editor is FormEditorControl form)
+        {
+            if (id == "formTabOrder") await form.EditTabOrderAsync(); else form.ExecuteRibbon(id);
+        }
         else if (_editor is ReportPreviewControl report) report.ExecuteRibbon(id);
     }
 }

@@ -23,7 +23,7 @@ public static class OfficeContextCatalog
         DatabaseObjectKind.Form when design => new("formDesign", "Form Design", [
             new("Views", [C("datasheetView", "Form View", "form", true)]),
             new("Controls", [C("formLabel", "Label", "form"), C("formHeading", "Heading", "form"), C("formDelete", "Delete Control", "delete")]),
-            new("Tools", [C("propertySheet", "Property Sheet", "form", true), C("save", "Save", "save")])], true),
+            new("Tools", [C("formTabOrder", "Tab Order", "form"), C("propertySheet", "Property Sheet", "form", true), C("save", "Save", "save")])], true),
         DatabaseObjectKind.Form => new("formView", "Form", [new("Views", [C("designView", "Design View", "design", true)]),
             new("Records", [C("newRecord", "New", "new"), C("save", "Save", "save"), C("refresh", "Refresh", "refresh")])], true),
         DatabaseObjectKind.Report => new("reportPreview", "Print Preview", [

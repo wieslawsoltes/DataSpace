@@ -17,8 +17,9 @@ public sealed partial class DatabaseWorkspaceView
                 CloseButtonText = "Close", DefaultButton = ContentDialogButton.Close };
             dialog.Resources["ContentDialogMaxWidth"] = 1200d;
             editor.ImportCompleted += () => dialog.Hide();
+            dialog.Closing += editor.OnSourceDialogClosing;
             try { await dialog.ShowAsync(); imported = editor.ImportedTable; }
-            finally { dialog.Content = null; }
+            finally { dialog.Closing -= editor.OnSourceDialogClosing; dialog.Content = null; }
         }
         // Retire the popup's native inputs before opening and focusing its result.
         // Disposing them after opening the table can restore focus to a dead peer

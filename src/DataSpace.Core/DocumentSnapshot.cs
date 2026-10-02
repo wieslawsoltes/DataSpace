@@ -34,11 +34,7 @@ public static class DocumentSnapshot
             Forms = source.Forms.Select(f => new FormDefinition
             {
                 Name = f.Name, Title = f.Title, Source = f.Source, Width = f.Width, Height = f.Height,
-                Controls = f.Controls.Select(c => new LayoutControl
-                {
-                    Id = c.Id, Kind = c.Kind, Field = c.Field, Caption = c.Caption,
-                    X = c.X, Y = c.Y, Width = c.Width, Height = c.Height, FontSize = c.FontSize
-                }).ToList()
+                Controls = f.Controls.Select(c => c.Copy()).ToList()
             }).ToList(),
             Reports = source.Reports.Select(r => new ReportDefinition
             {

@@ -69,16 +69,26 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.insertText(value); await page.keyboard.press('Tab'); await page.waitForTimeout(150);
         assert.equal(await input.inputValue(), value);
     }
-    async function selectIndex(name, index, currentIndex = 0) {
+    async function selectIndex(name, index, currentIndex = 0, verifyHeldEnter = false) {
         const combo = peer('combobox', name); await focusNative(combo, name);
         // Open the native popup before accepting an item. Enter on a collapsed
         // selector can activate the parent dialog's default Close button.
         await page.keyboard.press('Space'); await page.waitForTimeout(200);
+        assert.equal(await combo.getAttribute('aria-expanded'), 'true', name + ' popup must actually open.');
         // Home does not move the focused native popup item on every Uno backend.
         // Navigate from the known selected item rather than assuming it reset to zero.
         const delta = index - currentIndex;
         for (let step = 0; step < Math.abs(delta); step++) { await page.keyboard.press(delta < 0 ? 'ArrowUp' : 'ArrowDown'); await page.waitForTimeout(80); }
-        await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+        if (verifyHeldEnter) {
+            await page.keyboard.down('Enter');
+            try {
+                await page.waitForTimeout(120);
+                assert.equal(await peer('button', 'Cancel operation').isEnabled(), false);
+                await status(/records 1–1.*1 page reads \/ 0 cache hits/);
+                checks++;
+            } finally { await page.keyboard.up('Enter'); }
+        } else await page.keyboard.press('Enter');
+        await page.waitForTimeout(200);
     }
     async function status(pattern) {
         let snapshot = '';
@@ -117,9 +127,11 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         // another page request nor leave keyboard focus outside the source modal.
         await focusNative(peer('combobox', 'Tables'), 'Tables');
         await page.keyboard.press('Space'); await page.waitForTimeout(200);
+        assert.equal(await peer('combobox', 'Tables').getAttribute('aria-expanded'), 'true');
         await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+        assert.equal(await peer('combobox', 'Tables').getAttribute('aria-expanded'), 'false');
         await status(/records 1–1.*1 page reads \/ 0 cache hits/); checks++;
-        await selectIndex('Tables', 1);
+        await selectIndex('Tables', 1, 0, true);
         await status(/records 1–200/); checks++;
         await button('Next ▶', true); await status(/records 201–400/);
         await button('◀ Previous', true); await status(/3 page reads \/ 1 cache hits/); checks++;
@@ -201,6 +213,7 @@ export async function externalBrowserChecks(page, baseURL, screenshots, ready) {
         await writeFile(screenshots + '/external-source-checks.json', JSON.stringify({ checks, sqliteRows: 403, jsonRows: 3, workerInt64Exact: true, sourceWrites: false }, null, 2));
         return checks;
     } catch (error) {
+        console.error('External native focus:', await page.evaluate(() => ({ role: document.activeElement?.getAttribute('role'), name: document.activeElement?.getAttribute('aria-label'), expanded: document.activeElement?.getAttribute('aria-expanded') })));
         await writeFile(screenshots + '/external-source-accessibility.txt', await page.locator('body').ariaSnapshot()); throw error;
     }
 }

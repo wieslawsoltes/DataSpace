@@ -1,3 +1,4 @@
+import { formTabOrderChecks } from './form-tab-order-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
@@ -45,6 +46,7 @@ export async function contextRibbonChecks(page, screenshots, database, saved) {
     await page.screenshot({ path: screenshots + '/form-context-ribbon.png', fullPage: true });
     await command('formDelete');
     await saved(db => db.Forms.find(form => form.Name === formName).Controls.length === form.Controls.length); checks++;
+    checks += await formTabOrderChecks(page, screenshots, database, saved, command);
     await command('datasheetView');
     await page.getByRole('button', { name: 'Form', exact: true }).waitFor({ state: 'attached' }); checks++;
 

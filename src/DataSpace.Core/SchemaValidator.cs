@@ -43,6 +43,7 @@ public static class SchemaValidator
             var source = document.Table(form.Source);
             if (form.Controls is null || form.Controls.Count > 512 || !Finite(form.Width, 100, 10000) || !Finite(form.Height, 100, 10000))
                 throw new DataSpaceException("Invalid form dimensions or controls.");
+            FormTabOrder.Validate(form);
             foreach (var control in form.Controls)
             {
                 if (!Enum.IsDefined(control.Kind) || !Finite(control.X, 0, 10000) || !Finite(control.Y, 0, 10000) ||
