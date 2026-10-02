@@ -85,7 +85,10 @@ export async function uiParityChecks(page, baseURL, screenshots, ready) {
         // Native context switching and property-sheet commands.
         await button('Table Fields'); await button('Design View'); await button('Table Design');
         assert.ok(await peer('button', 'Primary Key').count());
-        await button('Property Sheet'); await button('Property Sheet');
+        await button('Property Sheet');
+        assert.equal(await page.getByRole('textbox', { name: 'Caption', exact: true }).count(), 0);
+        await button('Property Sheet');
+        assert.equal(await page.getByRole('textbox', { name: 'Caption', exact: true }).count(), 1); checks++;
         await page.screenshot({ path: screenshots + '/table-design-ribbon.png', fullPage: true });
         await button('Datasheet View'); checks++;
         await button('Help'); await button('Navigation Pane'); await button('Navigation Pane'); checks++;

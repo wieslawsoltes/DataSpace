@@ -188,7 +188,11 @@ public sealed partial class FormEditorControl : UserControl, IDatabaseEditor
             case "formLabel": Add(LayoutControlKind.Label, null); break;
             case "formHeading": Add(LayoutControlKind.Heading, null); break;
             case "formDelete": DeleteSelected(); break;
-            case "propertySheet": _root.ColumnDefinitions[1].Width = new(_root.ColumnDefinitions[1].Width.Value == 0 ? 285 : 0); break;
+            case "propertySheet":
+                var show = _properties.Visibility == Visibility.Collapsed;
+                _properties.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+                _root.ColumnDefinitions[1].Width = new(show ? 285 : 0);
+                break;
         }
     }
     public void Commit()

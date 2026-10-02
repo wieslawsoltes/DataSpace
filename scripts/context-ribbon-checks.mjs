@@ -42,7 +42,10 @@ export async function contextRibbonChecks(page, screenshots, database, saved) {
     const after = await saved(db => db.Forms.find(form => form.Name === formName).Controls.length === form.Controls.length + 1);
     const added = after.Forms.find(form => form.Name === formName).Controls.at(-1);
     assert.equal(added.Kind, 'Label'); checks++;
-    await command('propertySheet'); await command('propertySheet');
+    await command('propertySheet');
+    assert.equal(await page.getByRole('textbox', { name: 'Form Caption', exact: true }).count(), 0);
+    await command('propertySheet');
+    assert.equal(await page.getByRole('textbox', { name: 'Form Caption', exact: true }).count(), 1); checks++;
     await page.screenshot({ path: screenshots + '/form-context-ribbon.png', fullPage: true });
     await command('formDelete');
     await saved(db => db.Forms.find(form => form.Name === formName).Controls.length === form.Controls.length); checks++;

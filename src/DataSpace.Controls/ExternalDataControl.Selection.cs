@@ -3,6 +3,16 @@ namespace DataSpace.Controls;
 public sealed partial class ExternalDataControl
 {
     private readonly HashSet<ComboBox> _settlingSelectors = [];
+    private int _selectionTraceCount;
+
+    // Temporary bounded regression diagnostics; never include input text, tokens,
+    // source endpoints, table names or selected values.
+    private void TraceSelection(string phase, ComboBox selector)
+    {
+        if (++_selectionTraceCount > 160 || XamlRoot is null) return;
+        var focus = FocusManager.GetFocusedElement(XamlRoot) as FrameworkElement;
+        Console.Error.WriteLine($"DS-SELECT {DateTime.UtcNow:HH:mm:ss.fff} {AutomationProperties.GetAutomationId(selector)} {phase} open={selector.IsDropDownOpen} index={selector.SelectedIndex} busy={_busy} changing={_changing} settling={_settlingSelectors.Count} state={selector.FocusState} native={focus?.GetType().Name} same={ReferenceEquals(focus, selector)}");
+    }
 
     internal void OnSourceDialogClosing(ContentDialog sender, ContentDialogClosingEventArgs args)
     {
@@ -12,6 +22,7 @@ public sealed partial class ExternalDataControl
         var selector = new[] { _provider, _sourceList, _tables }.FirstOrDefault(c => c.IsDropDownOpen)
             ?? _settlingSelectors.FirstOrDefault();
         if (selector is null) return;
+        TraceSelection("closing-cancelled", selector);
         args.Cancel = true;
         selector.IsDropDownOpen = false;
         DispatcherQueue.TryEnqueue(() =>
@@ -22,6 +33,12 @@ public sealed partial class ExternalDataControl
 
     private void OnCommittedSelection(ComboBox selector, Action selected)
     {
+        static bool TracedKey(VirtualKey key) => key is VirtualKey.Enter or VirtualKey.Space or VirtualKey.Escape or VirtualKey.Up or VirtualKey.Down or VirtualKey.Menu or VirtualKey.Tab;
+        selector.GotFocus += (_, _) => TraceSelection("got-focus", selector);
+        selector.LostFocus += (_, _) => TraceSelection("lost-focus", selector);
+        selector.DropDownOpened += (_, _) => TraceSelection("opened", selector);
+        selector.AddHandler(KeyDownEvent, new KeyEventHandler((_, e) => { if (TracedKey(e.Key)) TraceSelection("down-" + e.Key + "-handled-" + e.Handled, selector); }), true);
+        selector.AddHandler(KeyUpEvent, new KeyEventHandler((_, e) => { if (TracedKey(e.Key)) TraceSelection("up-" + e.Key + "-handled-" + e.Handled, selector); }), true);
         var pending = false;
         var committed = selector.SelectedItem;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
@@ -51,6 +68,7 @@ public sealed partial class ExternalDataControl
             // Wait for physical key release, not an assumed dispatch delay.
             if (ActivationKeyDown()) return;
             timer.Stop(); _settlingSelectors.Remove(selector);
+            TraceSelection("settled", selector);
             if (!pending) return;
             pending = false;
             var next = selector.SelectedItem;
@@ -60,12 +78,14 @@ public sealed partial class ExternalDataControl
         };
         selector.SelectionChanged += (_, _) =>
         {
+            TraceSelection("selection", selector);
             if (_disposed || _changing || _busy) { Reset(); return; }
             pending = true;
             QueueSelection();
         };
         selector.DropDownClosed += (_, _) =>
         {
+            TraceSelection("closed", selector);
             if (_disposed || _changing || _busy) { Reset(); return; }
             _settlingSelectors.Add(selector);
             // Also settle an unchanged/Escape-closed popup with no page to read.

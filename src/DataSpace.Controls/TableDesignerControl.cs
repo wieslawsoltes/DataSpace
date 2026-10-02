@@ -90,7 +90,10 @@ public sealed class TableDesignerControl : UserControl, IDatabaseEditor
     }
     public void ToggleProperties()
     {
-        if (Content is Grid root) root.ColumnDefinitions[1].Width = new(root.ColumnDefinitions[1].Width.Value == 0 ? 300 : 0);
+        if (Content is not Grid root) return;
+        var show = _properties.Visibility == Visibility.Collapsed;
+        _properties.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        root.ColumnDefinitions[1].Width = new(show ? 300 : 0);
     }
     public async Task ExecuteRibbonAsync(string command)
     {
